@@ -1,0 +1,231 @@
+//@version=6
+// =============================================================================
+//  GOLD MASTER STRATEGY v3 — XAUUSD — VERSION 15 MIN « AGRESSIVE »
+//  Variante calibrée pour le 15 min + risque plus élevé.
+//  Auteur : Équipe Trading
+//
+//  DIFFÉRENCES vs la version principale (4H) :
+//   - Filtre HTF 4H ACTIVÉ par défaut (indispensable en 15 min pour rester
+//     dans le sens de la grande tendance, sinon on se fait hacher).
+//   - Risque 2 %/trade + levier max 10 (pour viser plus de rendement ; le
+//     levier doit être levé sinon les petits stops du 15 min bridrent la taille).
+//   - Commission 0.03 % (réaliste : beaucoup plus de trades en 15 min).
+//   - Fenêtre de repli raccourcie (4 barres).
+//
+//  ⚠️ AVERTISSEMENT : 15 min = plus de bruit, plus de trades, plus de
+//  sensibilité au spread. Plus de risque = plus de rendement MAIS plus de
+//  drawdown. À tester avant tout usage réel.
+//
+//  Time frame à utiliser : 15 min. Filtre supérieur : 4H.
+// =============================================================================
+
+strategy(
+     title              = "Gold Master v3 — XAUUSD 15m Agressif",
+     shorttitle         = "GOLD-15m-AGGR",
+     overlay            = true,
+     pyramiding         = 0,
+     initial_capital    = 1000,
+     currency           = currency.EUR,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 100,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.03,
+     slippage           = 1,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+// =============================================================================
+//  PARAMÈTRES
+// =============================================================================
+
+// --- Moyennes mobiles ---
+grpMA      = "1) Moyennes mobiles"
+emaFastLen = input.int(20,  "EMA rapide (pullback)", minval = 1, group = grpMA)
+emaMidLen  = input.int(50,  "EMA moyenne (régime)",  minval = 1, group = grpMA)
+emaTrendLen= input.int(200, "EMA de fond (tendance)",minval = 1, group = grpMA)
+
+// --- Supertrend (confirmation + trailing) ---
+grpST      = "2) Supertrend"
+stAtrLen   = input.int(10,   "Supertrend ATR",    minval = 1, group = grpST)
+stFactor   = input.float(3.0,"Supertrend facteur",minval = 0.5, step = 0.1, group = grpST)
+
+// --- Filtres de régime ---
+grpReg     = "3) Filtres de régime"
+useSlope   = input.bool(true, "Filtre pente EMA200 (évite les ranges)", group = grpReg)
+slopeLen   = input.int(20, "Longueur pente", minval = 1, group = grpReg)
+useAdx     = input.bool(true, "Filtre force (ADX)", group = grpReg)
+adxLen     = input.int(14, "ADX longueur", minval = 1, group = grpReg)
+adxMin     = input.float(20, "ADX minimum", minval = 0, group = grpReg)
+useRsi     = input.bool(false,"Filtre RSI", group = grpReg)
+rsiLen     = input.int(14, "RSI longueur", minval = 1, group = grpReg)
+rsiMid     = input.int(50, "RSI seuil", minval = 1, maxval = 100, group = grpReg)
+
+// --- Filtre tendance supérieure (MTF) — ACTIVÉ par défaut en 15 min ---
+grpHTF     = "4) Tendance supérieure (MTF)"
+useHTF     = input.bool(true, "Activer filtre HTF (Supertrend)", group = grpHTF)
+htfTf      = input.timeframe("240", "Time frame supérieur", group = grpHTF)
+
+// --- Entrée pullback ---
+grpEntry   = "5) Entrée (pullback)"
+pullbackBars = input.int(4, "Fenêtre de repli (barres)", minval = 1, group = grpEntry)
+
+// --- Gestion du risque ---
+grpRisk    = "6) Gestion du risque"
+atrLen     = input.int(14,   "ATR longueur",               minval = 1, group = grpRisk)
+atrStopMult= input.float(2.0,"Stop initial (x ATR)",       minval = 0.1, step = 0.1, group = grpRisk)
+useFixedTP = input.bool(false,"Take profit fixe (sinon trailing pur)", group = grpRisk)
+rrRatio    = input.float(2.5,"Ratio Risque/Récompense (TP)",minval = 0.1, step = 0.1, group = grpRisk)
+trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend", "ATR", "Aucun"], group = grpRisk)
+trailAtrMult= input.float(2.5,"Trailing (x ATR)",          minval = 0.1, step = 0.1, group = grpRisk)
+riskPct    = input.float(2.0,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
+
+// --- Money management ---
+grpMM      = "6b) Money management"
+maxLev     = input.float(10.0, "Levier max (taille position / capital)", minval = 0.1, step = 0.1, group = grpMM, tooltip = "Plafonne la taille de position. En 15 min les stops sont petits : il faut un levier suffisant pour atteindre le risque visé.")
+useBE      = input.bool(true, "Mettre le stop à break-even après +1R", group = grpMM, tooltip = "Quand le trade gagne 1x le risque, le stop remonte au point d'entrée -> le trade ne peut plus devenir perdant.")
+beTrigger  = input.float(1.0, "Déclencheur break-even (x R)", minval = 0.1, step = 0.1, group = grpMM)
+usePartial = input.bool(true, "Sortie partielle à +1R (encaisser une partie)", group = grpMM, tooltip = "Encaisse une partie des gains tôt et laisse courir le reste -> lisse la courbe de capital.")
+partialPct = input.float(50, "Part à clôturer (%)", minval = 1, maxval = 99, step = 5, group = grpMM)
+partialR   = input.float(1.0, "Cible sortie partielle (x R)", minval = 0.1, step = 0.1, group = grpMM)
+
+// --- Filtres session / volume / date ---
+grpFilt    = "7) Session / Volume / Date"
+useSession = input.bool(false,"Trader uniquement sur une plage horaire", group = grpFilt)
+sessionStr = input.session("1200-1600", "Plage (overlap Londres/NY, heure graphique)", group = grpFilt)
+useVol     = input.bool(false,"Filtre volume (> moyenne)", group = grpFilt)
+volLen     = input.int(20, "Volume longueur moyenne", minval = 1, group = grpFilt)
+volMult    = input.float(1.2,"Volume x moyenne", minval = 0.1, step = 0.1, group = grpFilt)
+useDate    = input.bool(false,"Limiter la plage de dates", group = grpFilt)
+startDate  = input.time(timestamp("01 Jan 2018 00:00"), "Début", group = grpFilt)
+endDate    = input.time(timestamp("01 Jan 2030 00:00"), "Fin",   group = grpFilt)
+
+// =============================================================================
+//  CALCULS
+// =============================================================================
+
+emaFast  = ta.ema(close, emaFastLen)
+emaMid   = ta.ema(close, emaMidLen)
+emaTrend = ta.ema(close, emaTrendLen)
+
+[stLine, stDir] = ta.supertrend(stFactor, stAtrLen)   // stDir < 0 = haussier ; > 0 = baissier
+stBull = stDir < 0
+stBear = stDir > 0
+
+rsi = ta.rsi(close, rsiLen)
+[diP, diM, adx] = ta.dmi(adxLen, adxLen)
+atr = ta.atr(atrLen)
+
+// Filtre MTF (Supertrend du time frame supérieur)
+[htfLine, htfDir] = request.security(syminfo.tickerid, htfTf, ta.supertrend(stFactor, stAtrLen), lookahead = barmerge.lookahead_off)
+htfBull = not useHTF or htfDir[1] < 0
+htfBear = not useHTF or htfDir[1] > 0
+
+// --- Régime de tendance ---
+regimeUp   = emaMid > emaTrend and close > emaTrend
+regimeDown = emaMid < emaTrend and close < emaTrend
+
+slopeUp   = not useSlope or emaTrend > emaTrend[slopeLen]
+slopeDown = not useSlope or emaTrend < emaTrend[slopeLen]
+
+adxOk = not useAdx or adx >= adxMin
+rsiBull = not useRsi or rsi > rsiMid
+rsiBear = not useRsi or rsi < rsiMid
+
+inSession = not useSession or not na(time(timeframe.period, sessionStr))
+volOk     = not useVol or volume > ta.sma(volume, volLen) * volMult
+inDate    = not useDate or (time >= startDate and time <= endDate)
+tradeOk   = inSession and inDate and volOk
+
+// =============================================================================
+//  ENTRÉE SUR PULLBACK
+// =============================================================================
+
+triggerUp   = ta.crossover(close, emaFast)
+triggerDown = ta.crossunder(close, emaFast)
+
+pulledBackLong  = ta.lowest(close, pullbackBars) < emaFast
+pulledBackShort = ta.highest(close, pullbackBars) > emaFast
+
+longCond  = regimeUp   and slopeUp   and stBull and htfBull and adxOk and rsiBull and triggerUp   and pulledBackLong  and tradeOk
+shortCond = regimeDown and slopeDown and stBear and htfBear and adxOk and rsiBear and triggerDown and pulledBackShort and tradeOk
+
+// =============================================================================
+//  DIMENSIONNEMENT (risque ATR + plafond de levier)
+// =============================================================================
+stopDist = atr * atrStopMult
+riskCash = strategy.equity * (riskPct / 100.0)
+qtyRisk  = stopDist > 0 ? riskCash / stopDist : na
+qtyCap   = close > 0 ? (strategy.equity * maxLev) / close : na
+qty      = na(qtyRisk) ? na : math.min(qtyRisk, qtyCap)
+
+// =============================================================================
+//  EXÉCUTION
+// =============================================================================
+var float entryPrice = na
+var float riskUnit   = na
+var float longStop   = na
+var float shortStop  = na
+var bool  beDone     = false
+var bool  partDone   = false
+
+if longCond and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, qty = qty)
+    entryPrice := close
+    riskUnit   := stopDist
+    longStop   := close - stopDist
+    beDone     := false
+    partDone   := false
+
+if shortCond and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, qty = qty)
+    entryPrice := close
+    riskUnit   := stopDist
+    shortStop  := close + stopDist
+    beDone     := false
+    partDone   := false
+
+// --- Gestion des sorties LONG ---
+if strategy.position_size > 0 and not na(entryPrice)
+    trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close - atr * trailAtrMult : na
+    if not na(trail)
+        longStop := math.max(longStop, trail)
+    if useBE and not beDone and high >= entryPrice + riskUnit * beTrigger
+        longStop := math.max(longStop, entryPrice)
+        beDone   := true
+    if usePartial and not partDone and high >= entryPrice + riskUnit * partialR
+        strategy.close("Long", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
+    longTP = entryPrice + riskUnit * rrRatio
+    strategy.exit("Sortie L", from_entry = "Long", stop = longStop, limit = useFixedTP ? longTP : na)
+
+// --- Gestion des sorties SHORT ---
+if strategy.position_size < 0 and not na(entryPrice)
+    trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close + atr * trailAtrMult : na
+    if not na(trail)
+        shortStop := math.min(shortStop, trail)
+    if useBE and not beDone and low <= entryPrice - riskUnit * beTrigger
+        shortStop := math.min(shortStop, entryPrice)
+        beDone    := true
+    if usePartial and not partDone and low <= entryPrice - riskUnit * partialR
+        strategy.close("Short", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
+    shortTP = entryPrice - riskUnit * rrRatio
+    strategy.exit("Sortie S", from_entry = "Short", stop = shortStop, limit = useFixedTP ? shortTP : na)
+
+// =============================================================================
+//  VISUEL
+// =============================================================================
+plot(emaFast,  "EMA rapide",  color = color.new(color.aqua, 0),    linewidth = 1)
+plot(emaMid,   "EMA moyenne", color = color.new(color.orange, 0),  linewidth = 1)
+plot(emaTrend, "EMA de fond", color = color.new(color.fuchsia, 0), linewidth = 2)
+plot(stLine, "Supertrend", color = stBull ? color.new(color.green, 0) : color.new(color.red, 0), style = plot.style_linebr)
+
+bgcolor(useSession and not inSession ? color.new(color.gray, 92) : na, title = "Hors session")
+plotshape(longCond,  "Signal Long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
+plotshape(shortCond, "Signal Short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
+
+// =============================================================================
+//  ALERTES
+// =============================================================================
+alertcondition(longCond,  "GOLD Long 15m",  "Signal LONG XAUUSD 15m")
+alertcondition(shortCond, "GOLD Short 15m", "Signal SHORT XAUUSD 15m")
