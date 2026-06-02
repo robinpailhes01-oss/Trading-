@@ -1,0 +1,181 @@
+//@version=6
+// =============================================================================
+//  GOLD MASTER STRATEGY — XAUUSD
+//  Stratégie de tendance + momentum pensée comme un desk de prop trading
+//  Auteur : Équipe Trading
+//
+//  Philosophie (inspirée des desks institutionnels sur l'or) :
+//   1. On ne trade JAMAIS contre la tendance de fond (filtre EMA 200 + HTF).
+//   2. On entre sur un repli/momentum dans le sens de la tendance.
+//   3. On confirme avec la FORCE de tendance (ADX) et le momentum (RSI).
+//   4. On ne trade que pendant les sessions liquides (Londres / New York).
+//   5. Le risque est défini AVANT le trade : stop ATR, R:R fixe, trailing.
+//
+//  Time frame recommandé : 15 min (intraday) ou 1H (swing court).
+//  Filtre de tendance supérieur : 4H par défaut.
+// =============================================================================
+
+strategy(
+     title              = "Gold Master Strategy — XAUUSD",
+     shorttitle         = "GOLD-MASTER",
+     overlay            = true,
+     pyramiding         = 0,
+     initial_capital    = 10000,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 100,
+     commission_type    = strategy.commission.cash_per_order,
+     commission_value   = 0.5,
+     slippage           = 2,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+// =============================================================================
+//  ENTRÉES / PARAMÈTRES
+// =============================================================================
+
+// --- Tendance ---
+grpTrend   = "1) Tendance"
+emaFastLen = input.int(21,  "EMA rapide",      minval = 1, group = grpTrend)
+emaSlowLen = input.int(50,  "EMA lente",       minval = 1, group = grpTrend)
+emaTrendLen= input.int(200, "EMA de fond",     minval = 1, group = grpTrend)
+useHTF     = input.bool(true, "Activer filtre tendance supérieure (HTF)", group = grpTrend)
+htfTf      = input.timeframe("240", "Time frame supérieur", group = grpTrend)
+
+// --- Momentum / Force ---
+grpMom     = "2) Momentum & Force"
+rsiLen     = input.int(14, "RSI longueur",       minval = 1, group = grpMom)
+rsiBull    = input.int(50, "RSI seuil haussier", minval = 1, maxval = 100, group = grpMom)
+rsiBear    = input.int(50, "RSI seuil baissier", minval = 1, maxval = 100, group = grpMom)
+useAdx     = input.bool(true, "Filtre force de tendance (ADX)", group = grpMom)
+adxLen     = input.int(14, "ADX longueur",       minval = 1, group = grpMom)
+adxMin     = input.float(20, "ADX minimum",      minval = 0, group = grpMom)
+
+// --- Risque / Gestion de position ---
+grpRisk    = "3) Gestion du risque"
+atrLen     = input.int(14,  "ATR longueur",      minval = 1, group = grpRisk)
+atrStopMult= input.float(1.5, "Multiplicateur ATR (Stop)", minval = 0.1, step = 0.1, group = grpRisk)
+rrRatio    = input.float(2.0, "Ratio Risque/Récompense (TP)", minval = 0.1, step = 0.1, group = grpRisk)
+useTrail   = input.bool(true,  "Activer trailing stop (ATR)", group = grpRisk)
+trailMult  = input.float(2.0,  "Multiplicateur ATR (Trailing)", minval = 0.1, step = 0.1, group = grpRisk)
+riskPct    = input.float(1.0,  "Risque par trade (% du capital)", minval = 0.1, step = 0.1, group = grpRisk)
+
+// --- Filtre de session (heures UTC du graphique) ---
+grpSess    = "4) Sessions"
+useSession = input.bool(true, "Trader uniquement Londres + New York", group = grpSess)
+sessionStr = input.session("0700-2000", "Plage horaire (heure du graphique)", group = grpSess)
+
+// --- Filtre de date ---
+grpDate    = "5) Plage de dates (backtest)"
+useDate    = input.bool(false, "Limiter la plage de dates", group = grpDate)
+startDate  = input.time(timestamp("01 Jan 2018 00:00"), "Début", group = grpDate)
+endDate    = input.time(timestamp("01 Jan 2030 00:00"), "Fin",   group = grpDate)
+
+// =============================================================================
+//  CALCULS
+// =============================================================================
+
+emaFast  = ta.ema(close, emaFastLen)
+emaSlow  = ta.ema(close, emaSlowLen)
+emaTrend = ta.ema(close, emaTrendLen)
+
+rsi = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+atr = ta.atr(atrLen)
+
+// Filtre tendance supérieure : prix au-dessus/dessous de l'EMA de fond en HTF
+htfTrendEma = request.security(syminfo.tickerid, htfTf, ta.ema(close, emaTrendLen), lookahead = barmerge.lookahead_off)
+htfBull = not useHTF or close > htfTrendEma
+htfBear = not useHTF or close < htfTrendEma
+
+// Conditions de tendance locale
+trendUp   = emaFast > emaSlow and close > emaTrend
+trendDown = emaFast < emaSlow and close < emaTrend
+
+// Force de tendance
+adxOk = not useAdx or adx >= adxMin
+
+// Filtre de session
+inSession = not useSession or not na(time(timeframe.period, sessionStr))
+
+// Filtre de date
+inDate = not useDate or (time >= startDate and time <= endDate)
+
+tradeOk = inSession and inDate
+
+// =============================================================================
+//  SIGNAUX D'ENTRÉE
+//  Long  : tendance haussière + repli puis reprise (croisement close/EMA rapide)
+//          + RSI > seuil + ADX OK + HTF haussier
+//  Short : symétrique
+// =============================================================================
+
+longTrigger  = ta.crossover(close, emaFast)
+shortTrigger = ta.crossunder(close, emaFast)
+
+longCond  = trendUp   and longTrigger  and rsi > rsiBull and adxOk and htfBull and tradeOk
+shortCond = trendDown and shortTrigger and rsi < rsiBear and adxOk and htfBear and tradeOk
+
+// =============================================================================
+//  DIMENSIONNEMENT DE POSITION (basé sur le risque ATR)
+// =============================================================================
+
+stopDist = atr * atrStopMult
+riskCash = strategy.equity * (riskPct / 100.0)
+// quantité = risque en $ / risque par unité (distance de stop)
+qty = stopDist > 0 ? riskCash / stopDist : na
+
+// =============================================================================
+//  EXÉCUTION DES ORDRES
+// =============================================================================
+
+if longCond and strategy.position_size == 0
+    entry = close
+    sl    = entry - stopDist
+    tp    = entry + stopDist * rrRatio
+    strategy.entry("Long", strategy.long, qty = qty)
+    strategy.exit("Sortie L", from_entry = "Long", stop = sl, limit = tp)
+
+if shortCond and strategy.position_size == 0
+    entry = close
+    sl    = entry + stopDist
+    tp    = entry - stopDist * rrRatio
+    strategy.entry("Short", strategy.short, qty = qty)
+    strategy.exit("Sortie S", from_entry = "Short", stop = sl, limit = tp)
+
+// --- Trailing stop ATR (resserre le stop quand le trade évolue en notre faveur) ---
+var float longTrail  = na
+var float shortTrail = na
+
+if useTrail
+    if strategy.position_size > 0
+        newTrail = close - atr * trailMult
+        longTrail := na(longTrail) ? newTrail : math.max(longTrail, newTrail)
+        strategy.exit("Trail L", from_entry = "Long", stop = longTrail)
+    else
+        longTrail := na
+
+    if strategy.position_size < 0
+        newTrail = close + atr * trailMult
+        shortTrail := na(shortTrail) ? newTrail : math.min(shortTrail, newTrail)
+        strategy.exit("Trail S", from_entry = "Short", stop = shortTrail)
+    else
+        shortTrail := na
+
+// =============================================================================
+//  VISUEL
+// =============================================================================
+
+plot(emaFast,  "EMA rapide",  color = color.new(color.aqua, 0),   linewidth = 1)
+plot(emaSlow,  "EMA lente",   color = color.new(color.orange, 0), linewidth = 1)
+plot(emaTrend, "EMA de fond", color = color.new(color.fuchsia, 0),linewidth = 2)
+
+bgcolor(useSession and not inSession ? color.new(color.gray, 90) : na, title = "Hors session")
+
+plotshape(longCond,  title = "Signal Long",  style = shape.triangleup,   location = location.belowbar, color = color.new(color.green, 0), size = size.small)
+plotshape(shortCond, title = "Signal Short", style = shape.triangledown, location = location.abovebar, color = color.new(color.red, 0),   size = size.small)
+
+// =============================================================================
+//  ALERTES
+// =============================================================================
+alertcondition(longCond,  "GOLD Long",  "Signal LONG XAUUSD")
+alertcondition(shortCond, "GOLD Short", "Signal SHORT XAUUSD")
