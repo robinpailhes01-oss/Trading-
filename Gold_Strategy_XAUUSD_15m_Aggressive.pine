@@ -51,11 +51,11 @@ stFactor   = input.float(3.0,"Supertrend facteur",minval = 0.5, step = 0.1, grou
 
 // --- Filtres de régime ---
 grpReg     = "3) Filtres de régime"
-useSlope   = input.bool(true, "Filtre pente EMA200 (évite les ranges)", group = grpReg)
+useSlope   = input.bool(false,"Filtre pente EMA200 (évite les ranges)", group = grpReg)
 slopeLen   = input.int(20, "Longueur pente", minval = 1, group = grpReg)
 useAdx     = input.bool(true, "Filtre force (ADX)", group = grpReg)
 adxLen     = input.int(14, "ADX longueur", minval = 1, group = grpReg)
-adxMin     = input.float(20, "ADX minimum", minval = 0, group = grpReg)
+adxMin     = input.float(15, "ADX minimum", minval = 0, group = grpReg)
 useRsi     = input.bool(false,"Filtre RSI", group = grpReg)
 rsiLen     = input.int(14, "RSI longueur", minval = 1, group = grpReg)
 rsiMid     = input.int(50, "RSI seuil", minval = 1, maxval = 100, group = grpReg)
@@ -77,14 +77,14 @@ useFixedTP = input.bool(false,"Take profit fixe (sinon trailing pur)", group = g
 rrRatio    = input.float(2.5,"Ratio Risque/Récompense (TP)",minval = 0.1, step = 0.1, group = grpRisk)
 trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend", "ATR", "Aucun"], group = grpRisk)
 trailAtrMult= input.float(2.5,"Trailing (x ATR)",          minval = 0.1, step = 0.1, group = grpRisk)
-riskPct    = input.float(2.0,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
+riskPct    = input.float(3.0,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
 
 // --- Money management ---
 grpMM      = "6b) Money management"
-maxLev     = input.float(10.0, "Levier max (taille position / capital)", minval = 0.1, step = 0.1, group = grpMM, tooltip = "Plafonne la taille de position. En 15 min les stops sont petits : il faut un levier suffisant pour atteindre le risque visé.")
+maxLev     = input.float(20.0, "Levier max (taille position / capital)", minval = 0.1, step = 0.1, group = grpMM, tooltip = "Plafonne la taille de position. En 15 min les stops sont petits : il faut un levier suffisant pour atteindre le risque visé.")
 useBE      = input.bool(true, "Mettre le stop à break-even après +1R", group = grpMM, tooltip = "Quand le trade gagne 1x le risque, le stop remonte au point d'entrée -> le trade ne peut plus devenir perdant.")
 beTrigger  = input.float(1.0, "Déclencheur break-even (x R)", minval = 0.1, step = 0.1, group = grpMM)
-usePartial = input.bool(true, "Sortie partielle à +1R (encaisser une partie)", group = grpMM, tooltip = "Encaisse une partie des gains tôt et laisse courir le reste -> lisse la courbe de capital.")
+usePartial = input.bool(false,"Sortie partielle à +1R (encaisser une partie)", group = grpMM, tooltip = "Encaisse une partie des gains tôt et laisse courir le reste -> lisse la courbe de capital.")
 partialPct = input.float(50, "Part à clôturer (%)", minval = 1, maxval = 99, step = 5, group = grpMM)
 partialR   = input.float(1.0, "Cible sortie partielle (x R)", minval = 0.1, step = 0.1, group = grpMM)
 
