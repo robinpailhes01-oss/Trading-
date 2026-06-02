@@ -60,10 +60,10 @@ rsiMid     = input.int(50, "RSI seuil", minval = 1, maxval = 100, group = grpReg
 
 // --- SUPPORT / RÉSISTANCE (price action) ---
 grpSR      = "3b) Support / Résistance"
-useSR      = input.bool(true, "Activer filtre Support/Résistance (pivots)", group = grpSR, tooltip = "Acheter uniquement près d'un support, vendre uniquement près d'une résistance.")
+useSR      = input.bool(true, "Activer filtre Support/Résistance (pivots)", group = grpSR, tooltip = "Bloque les entrées sans 'place pour courir' : pas d'achat juste sous une résistance, pas de vente juste au-dessus d'un support.")
 pivLen     = input.int(10, "Sensibilité pivots (barres G/D)", minval = 2, group = grpSR, tooltip = "Plus grand = supports/résistances majeurs ; plus petit = niveaux plus fréquents.")
-srProx     = input.float(2.0, "Proximité de la zone (x ATR)", minval = 0.1, step = 0.1, group = grpSR, tooltip = "Distance max au niveau pour considérer qu'on est 'à la zone'.")
-srStop     = input.bool(true, "Placer le stop sous le support / au-dessus de la résistance", group = grpSR, tooltip = "Stop logique placé au-delà du niveau S/R (avec marge ATR) plutôt qu'un stop ATR pur.")
+srRoom     = input.float(1.0, "Place minimale vers la zone opposée (x ATR)", minval = 0.0, step = 0.1, group = grpSR, tooltip = "Distance minimale qu'il faut avoir avant la résistance (long) / le support (short). Mettre 0 pour désactiver le blocage.")
+srStop     = input.bool(false,"Placer le stop sous le support / au-dessus de la résistance", group = grpSR, tooltip = "Stop logique calé sur le niveau S/R (peut donner des stops larges -> positions plus petites).")
 
 // --- Filtre tendance supérieure (MTF) ---
 grpHTF     = "4) Tendance supérieure (MTF)"
@@ -95,7 +95,7 @@ partialR   = input.float(1.0, "Cible sortie partielle (x R)", minval = 0.1, step
 
 // --- Volume / Session / Date ---
 grpFilt    = "7) Volume / Session / Date"
-useVol     = input.bool(true, "Filtre volume (> moyenne)", group = grpFilt, tooltip = "Sur l'or spot c'est le tick volume du broker (approximation), utile en confirmation.")
+useVol     = input.bool(false,"Filtre volume (> moyenne)", group = grpFilt, tooltip = "Sur l'or spot c'est le tick volume du broker (approximation). Désactivé par défaut pour ne pas trop restreindre.")
 volLen     = input.int(20, "Volume longueur moyenne", minval = 1, group = grpFilt)
 volMult    = input.float(1.1,"Volume x moyenne", minval = 0.1, step = 0.1, group = grpFilt)
 useSession = input.bool(false,"Trader uniquement sur une plage horaire", group = grpFilt)
@@ -134,9 +134,14 @@ if not na(ph)
 if not na(pl)
     supLevel := pl
 
-// on est "à la zone" si le prix est proche du niveau (en ATR)
-nearSupport = not useSR or (not na(supLevel) and math.abs(close - supLevel) <= srProx * atr)
-nearResist  = not useSR or (not na(resLevel) and math.abs(close - resLevel) <= srProx * atr)
+// "Place pour courir" : on ne se fait pas bloquer par une zone opposée trop proche.
+// - Long : s'il y a une RÉSISTANCE au-dessus du prix, il faut au moins srRoom*ATR de marge.
+//          (Si la résistance est déjà sous le prix = cassée = aucun blocage.)
+// - Short : symétrique avec le support en-dessous.
+resAbove = not na(resLevel) and resLevel > close
+supBelow = not na(supLevel) and supLevel < close
+roomLong  = not useSR or not resAbove or (resLevel - close) >= srRoom * atr
+roomShort = not useSR or not supBelow or (close - supLevel) >= srRoom * atr
 
 // --- Régime de tendance ---
 regimeUp   = emaMid > emaTrend and close > emaTrend
@@ -160,8 +165,8 @@ triggerDown = ta.crossunder(close, emaFast)
 pulledBackLong  = ta.lowest(close, pullbackBars) < emaFast
 pulledBackShort = ta.highest(close, pullbackBars) > emaFast
 
-longCond  = regimeUp   and slopeUp   and stBull and htfBull and adxOk and rsiBull and triggerUp   and pulledBackLong  and nearSupport and tradeOk
-shortCond = regimeDown and slopeDown and stBear and htfBear and adxOk and rsiBear and triggerDown and pulledBackShort and nearResist  and tradeOk
+longCond  = regimeUp   and slopeUp   and stBull and htfBull and adxOk and rsiBull and triggerUp   and pulledBackLong  and roomLong  and tradeOk
+shortCond = regimeDown and slopeDown and stBear and htfBear and adxOk and rsiBear and triggerDown and pulledBackShort and roomShort and tradeOk
 
 // =============================================================================
 //  DIMENSIONNEMENT (risque + plafond de levier)
@@ -169,8 +174,8 @@ shortCond = regimeDown and slopeDown and stBear and htfBear and adxOk and rsiBea
 // =============================================================================
 atrStopDist = atr * atrStopMult
 // stop "price action" : sous le support (long) / au-dessus de la résistance (short), + marge 0.5 ATR
-longSrDist  = (useSR and srStop and not na(supLevel)) ? math.max(close - (supLevel - 0.5 * atr), atr * 0.5) : atrStopDist
-shortSrDist = (useSR and srStop and not na(resLevel)) ? math.max((resLevel + 0.5 * atr) - close, atr * 0.5) : atrStopDist
+longSrDist  = (useSR and srStop and supBelow) ? math.min(math.max(close - (supLevel - 0.5 * atr), atr * 0.5), atrStopDist * 2.5) : atrStopDist
+shortSrDist = (useSR and srStop and resAbove) ? math.min(math.max((resLevel + 0.5 * atr) - close, atr * 0.5), atrStopDist * 2.5) : atrStopDist
 
 riskCash = strategy.equity * (riskPct / 100.0)
 
