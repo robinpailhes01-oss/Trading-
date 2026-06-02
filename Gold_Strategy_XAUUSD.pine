@@ -111,7 +111,7 @@ rsi = ta.rsi(close, rsiLen)
 atr = ta.atr(atrLen)
 
 // Filtre MTF (Supertrend du time frame supérieur)
-htfDir = request.security(syminfo.tickerid, htfTf, ta.supertrend(stFactor, stAtrLen), lookahead = barmerge.lookahead_off)
+[htfLine, htfDir] = request.security(syminfo.tickerid, htfTf, ta.supertrend(stFactor, stAtrLen), lookahead = barmerge.lookahead_off)
 htfBull = not useHTF or htfDir[1] < 0
 htfBear = not useHTF or htfDir[1] > 0
 
