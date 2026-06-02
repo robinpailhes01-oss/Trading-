@@ -10,6 +10,33 @@ gérer le risque avant tout**.
 
 ---
 
+## 🔧 v2 — Pourquoi la première version ne donnait qu'1 trade
+
+La v1 exigeait **6 conditions vraies en même temps qu'un croisement frais** → presque
+aucun signal ne passait. Résultat : 1 seul trade sur 6 mois (statistiquement inutile).
+
+**Corrections apportées en v2 :**
+- **Entrée sur croisement EMA rapide/lente** (signal fréquent) au lieu de « close croise
+  l'EMA rapide » combiné à tous les filtres.
+- **Tous les filtres sont optionnels** et désactivables → on optimise pas à pas.
+- **Sortie sur signal opposé** en plus du Stop/TP → les trades se clôturent correctement.
+- Réglages par défaut **permissifs** pour générer assez de trades, puis on resserre.
+
+### 📐 Méthode de réglage recommandée
+1. Charge la stratégie **avec les réglages par défaut** (filtres légers) → tu dois voir
+   **plusieurs dizaines de trades** sur 6 mois. C'est la base pour mesurer quoi que ce soit.
+2. Regarde **Facteur de profit** et **Baisse maximale** dans le Strategy Tester.
+3. **Active un filtre à la fois** (EMA 200, puis ADX, puis session) et observe si le Facteur
+   de profit **monte**. Garde le filtre seulement s'il améliore les stats.
+4. Ajuste **ATR Stop** et **Ratio R:R** pour réduire le drawdown.
+5. Valide sur **2–3 ans** de données (Deep Backtest), pas seulement 6 mois.
+
+> ❗ **Important** : un résultat sur 1 ou 2 trades ne veut rien dire. Il faut **30+ trades
+> minimum** pour qu'un backtest soit interprétable. Vise un échantillon large d'abord,
+> la rentabilité ensuite.
+
+---
+
 ## 🎯 Logique de la stratégie
 
 L'or est un actif fortement **directionnel et tendanciel**. La stratégie combine 5 filtres :
