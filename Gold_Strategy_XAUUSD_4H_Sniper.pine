@@ -80,11 +80,11 @@ useFixedTP = input.bool(false,"Take profit fixe (sinon trailing pur)", group = g
 rrRatio    = input.float(2.5,"Ratio Risque/Récompense (TP)",minval = 0.1, step = 0.1, group = grpRisk)
 trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend", "ATR", "Aucun"], group = grpRisk)
 trailAtrMult= input.float(2.5,"Trailing (x ATR)",          minval = 0.1, step = 0.1, group = grpRisk)
-riskPct    = input.float(1.0,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
+riskPct    = input.float(3.0,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
 
 // --- Money management (orienté fiabilité) ---
 grpMM      = "6b) Money management"
-maxLev     = input.float(5.0, "Levier max (taille position / capital)", minval = 0.1, step = 0.1, group = grpMM, tooltip = "Plafonne la taille de position.")
+maxLev     = input.float(10.0, "Levier max (taille position / capital)", minval = 0.1, step = 0.1, group = grpMM, tooltip = "Plafonne la taille de position.")
 useBE      = input.bool(true, "Mettre le stop à break-even après +1R", group = grpMM, tooltip = "Le trade ne peut plus devenir perdant après +1R.")
 beTrigger  = input.float(1.0, "Déclencheur break-even (x R)", minval = 0.1, step = 0.1, group = grpMM)
 usePartial = input.bool(true, "Sortie partielle à +1R (sécurise le gain)", group = grpMM, tooltip = "Encaisse une partie tôt -> beaucoup plus de trades gagnants.")
