@@ -83,6 +83,15 @@ trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend"
 trailAtrMult= input.float(2.5,"Trailing (x ATR)",          minval = 0.1, step = 0.1, group = grpRisk)
 riskPct    = input.float(1.0,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
 
+// --- Money management ---
+grpMM      = "6b) Money management"
+maxLev     = input.float(1.0, "Levier max (taille position / capital)", minval = 0.1, step = 0.1, group = grpMM, tooltip = "Plafonne la taille de position pour éviter un levier irréaliste sur les petits TF.")
+useBE      = input.bool(true, "Mettre le stop à break-even après +1R", group = grpMM, tooltip = "Quand le trade gagne 1x le risque, le stop remonte au point d'entrée -> le trade ne peut plus devenir perdant.")
+beTrigger  = input.float(1.0, "Déclencheur break-even (x R)", minval = 0.1, step = 0.1, group = grpMM)
+usePartial = input.bool(true, "Sortie partielle à +1R (encaisser une partie)", group = grpMM, tooltip = "Encaisse une partie des gains tôt et laisse courir le reste -> lisse la courbe de capital.")
+partialPct = input.float(50, "Part à clôturer (%)", minval = 1, maxval = 99, step = 5, group = grpMM)
+partialR   = input.float(1.0, "Cible sortie partielle (x R)", minval = 0.1, step = 0.1, group = grpMM)
+
 // --- Filtres session / volume / date ---
 grpFilt    = "7) Session / Volume / Date"
 useSession = input.bool(false,"Trader uniquement sur une plage horaire", group = grpFilt)
@@ -149,42 +158,69 @@ longCond  = regimeUp   and slopeUp   and stBull and htfBull and adxOk and rsiBul
 shortCond = regimeDown and slopeDown and stBear and htfBear and adxOk and rsiBear and triggerDown and pulledBackShort and tradeOk
 
 // =============================================================================
-//  DIMENSIONNEMENT (risque ATR)
+//  DIMENSIONNEMENT (risque ATR + plafond de levier)
 // =============================================================================
 stopDist = atr * atrStopMult
 riskCash = strategy.equity * (riskPct / 100.0)
-qty      = stopDist > 0 ? riskCash / stopDist : na
+qtyRisk  = stopDist > 0 ? riskCash / stopDist : na           // taille basée sur le risque
+qtyCap   = close > 0 ? (strategy.equity * maxLev) / close : na // plafond de levier
+qty      = na(qtyRisk) ? na : math.min(qtyRisk, qtyCap)       // on garde la plus petite
 
 // =============================================================================
 //  EXÉCUTION
 // =============================================================================
-var float longStop  = na
-var float longTP    = na
-var float shortStop = na
-var float shortTP   = na
+var float entryPrice = na   // prix d'entrée mémorisé
+var float riskUnit   = na   // 1R en $ (distance de stop à l'entrée)
+var float longStop   = na
+var float shortStop  = na
+var bool  beDone     = false  // break-even déjà appliqué ?
+var bool  partDone   = false  // sortie partielle déjà faite ?
 
 if longCond and strategy.position_size <= 0
     strategy.entry("Long", strategy.long, qty = qty)
-    longStop := close - stopDist
-    longTP   := close + stopDist * rrRatio
+    entryPrice := close
+    riskUnit   := stopDist
+    longStop   := close - stopDist
+    beDone     := false
+    partDone   := false
 
 if shortCond and strategy.position_size >= 0
     strategy.entry("Short", strategy.short, qty = qty)
-    shortStop := close + stopDist
-    shortTP   := close - stopDist * rrRatio
+    entryPrice := close
+    riskUnit   := stopDist
+    shortStop  := close + stopDist
+    beDone     := false
+    partDone   := false
 
-// --- Gestion des sorties (trailing) ---
-if strategy.position_size > 0
-    // trailing
+// --- Gestion des sorties LONG ---
+if strategy.position_size > 0 and not na(entryPrice)
+    // 1) Trailing (Supertrend ou ATR)
     trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close - atr * trailAtrMult : na
     if not na(trail)
-        longStop := math.max(longStop, trail)   // le stop ne fait que monter
+        longStop := math.max(longStop, trail)         // le stop ne fait que monter
+    // 2) Break-even après +1R
+    if useBE and not beDone and high >= entryPrice + riskUnit * beTrigger
+        longStop := math.max(longStop, entryPrice)
+        beDone   := true
+    // 3) Sortie partielle à +nR
+    if usePartial and not partDone and high >= entryPrice + riskUnit * partialR
+        strategy.close("Long", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
+    longTP = entryPrice + riskUnit * rrRatio
     strategy.exit("Sortie L", from_entry = "Long", stop = longStop, limit = useFixedTP ? longTP : na)
 
-if strategy.position_size < 0
+// --- Gestion des sorties SHORT ---
+if strategy.position_size < 0 and not na(entryPrice)
     trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close + atr * trailAtrMult : na
     if not na(trail)
-        shortStop := math.min(shortStop, trail)  // le stop ne fait que descendre
+        shortStop := math.min(shortStop, trail)       // le stop ne fait que descendre
+    if useBE and not beDone and low <= entryPrice - riskUnit * beTrigger
+        shortStop := math.min(shortStop, entryPrice)
+        beDone    := true
+    if usePartial and not partDone and low <= entryPrice - riskUnit * partialR
+        strategy.close("Short", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
+    shortTP = entryPrice - riskUnit * rrRatio
     strategy.exit("Sortie S", from_entry = "Short", stop = shortStop, limit = useFixedTP ? shortTP : na)
 
 // =============================================================================

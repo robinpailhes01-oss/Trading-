@@ -46,6 +46,27 @@ D'après les sources analysées (voir plus bas), les stratégies or robustes par
   tendances de l'or et on coupe vite les faux départs.
 - Take profit fixe en option (R:R 2.5) si tu préfères des cibles fixes.
 
+### 💰 Money management intégré (groupe « 6b »)
+La taille de position est **calculée sur le risque** : `qty = (capital × risque%) / distance_de_stop`.
+Chaque trade ne risque donc qu'un **% fixe du capital** (1 % par défaut). En plus :
+
+| Réglage | Rôle | Effet |
+|---------|------|-------|
+| **Levier max** | Plafonne la taille de position (taille ≤ capital × levier) | Évite un levier irréaliste sur les petits TF |
+| **Break-even après +1R** | Remonte le stop au point d'entrée dès +1R de gain | Le trade ne peut plus devenir perdant |
+| **Sortie partielle à +1R** | Encaisse 50 % des gains tôt, laisse courir le reste | **Lisse fortement la courbe de capital** (moins de volatilité) |
+
+> 💡 C'est exactement ce qui réduit la volatilité d'une stratégie : on sécurise une partie
+> des gains rapidement (break-even + sortie partielle) tout en gardant un morceau pour les
+> grandes tendances.
+
+### ⚠️ Time frame : privilégie le 3H / 4H
+Les backtests montrent que cette stratégie est **bien plus stable sur les TF élevés** :
+- **3H** : Profit Factor ~1,4 sur 5 ans (34 trades) ✅
+- **15m / 1H** : beaucoup plus bruité, résultats instables ❌
+
+➡️ Utilise le **3H** (ou 4H) comme time frame principal.
+
 ---
 
 ## ⏱️ Time frame recommandé
