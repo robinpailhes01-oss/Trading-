@@ -66,7 +66,7 @@ trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend"
 trailAtrMult= input.float(2.5,"Trailing (x ATR)",    minval = 0.1, step = 0.1, group = grpRisk)
 useFixedTP = input.bool(false,"Take profit fixe (sinon trailing pur)", group = grpRisk)
 rrRatio    = input.float(2.5,"Cible TP (x R)",       minval = 0.1, step = 0.1, group = grpRisk)
-riskPct    = input.float(1.0,"Risque par trade (% capital)", minval = 0.1, step = 0.1, group = grpRisk)
+riskPct    = input.float(2.5,"Risque par trade (% capital)", minval = 0.1, step = 0.1, group = grpRisk)
 maxLev     = input.float(10.0,"Levier max", minval = 0.1, step = 0.1, group = grpRisk)
 useBE      = input.bool(true, "Break-even après +1R", group = grpRisk)
 usePartial = input.bool(true, "Sortie partielle à +1R", group = grpRisk)
