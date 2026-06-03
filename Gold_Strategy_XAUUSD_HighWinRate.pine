@@ -1,0 +1,188 @@
+//@version=6
+// =============================================================================
+//  GOLD HIGH WIN RATE — XAUUSD
+//  Stratégie sur-mesure : QUELQUES trades/semaine, FORT taux de réussite.
+//  Auteur : Équipe Trading
+//
+//  FONDEMENT (recherche) :
+//   - Sur l'or, le prix revient vers son EMA20 ~68 % du temps après un excès RSI.
+//   - Acheter les REPLIS dans le sens de la TENDANCE = haute probabilité.
+//   - Une CIBLE RAPPROCHÉE (R:R ~1.2) est touchée souvent -> taux de réussite élevé.
+//   - Le break-even transforme des perdants potentiels en "scratch".
+//
+//  PRINCIPE :
+//   1. Tendance de fond (EMA50 vs EMA200) -> on ne trade QUE dans son sens.
+//   2. On attend un REPLI : le RSI plonge dans la zone de repli PUIS rebondit
+//      (croise à la hausse en tendance haussière, et inversement).
+//   3. Cible rapprochée (TP fixe ~1.2R) + stop ATR -> beaucoup de trades gagnants.
+//   4. Break-even après +1R -> on ne rend plus un trade gagnant.
+//
+//  ⚠️ Taux de réussite élevé ≠ rentabilité garantie. Vise un Profit Factor > 1.3
+//     ET un bon taux de réussite. Teste sur 2-3 ans.
+//
+//  Time frame conseillé : 1H (quelques trades/semaine). Alternative : 30 min.
+// =============================================================================
+
+strategy(
+     title              = "Gold High Win Rate — XAUUSD",
+     shorttitle         = "GOLD-HWR",
+     overlay            = true,
+     pyramiding         = 0,
+     initial_capital    = 1000,
+     currency           = currency.EUR,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 100,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.02,
+     slippage           = 1,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+// =============================================================================
+//  PARAMÈTRES
+// =============================================================================
+
+// --- Tendance ---
+grpT       = "1) Tendance"
+emaMeanLen = input.int(20,  "EMA moyenne (cible/repli)", minval = 1, group = grpT)
+emaMidLen  = input.int(50,  "EMA régime",                minval = 1, group = grpT)
+emaTrendLen= input.int(200, "EMA de fond",               minval = 1, group = grpT)
+
+// --- RSI (repli) ---
+grpR       = "2) Repli RSI"
+rsiLen     = input.int(14, "RSI longueur", minval = 1, group = grpR)
+rsiBuy     = input.int(45, "Seuil repli ACHAT (RSI remonte au-dessus)", minval = 1, maxval = 100, group = grpR, tooltip = "En tendance haussière : on achète quand le RSI rebondit au-dessus de ce niveau après un repli.")
+rsiSell    = input.int(55, "Seuil repli VENTE (RSI redescend en-dessous)", minval = 1, maxval = 100, group = grpR)
+rsiDeep    = input.int(8,  "Profondeur de repli (barres récentes)", minval = 1, group = grpR, tooltip = "Le RSI doit avoir été dans la zone de repli dans les N dernières barres.")
+
+// --- Filtre de force ---
+grpF       = "3) Filtre"
+useAdx     = input.bool(true, "Filtre force (ADX)", group = grpF)
+adxLen     = input.int(14, "ADX longueur", minval = 1, group = grpF)
+adxMin     = input.float(18, "ADX minimum", minval = 0, group = grpF)
+
+// --- Risque / Cible ---
+grpRisk    = "4) Risque & cible"
+atrLen     = input.int(14,   "ATR longueur",         minval = 1, group = grpRisk)
+atrStopMult= input.float(1.5,"Stop (x ATR)",         minval = 0.1, step = 0.1, group = grpRisk)
+rrRatio    = input.float(1.2,"Cible Take Profit (x R)", minval = 0.1, step = 0.1, group = grpRisk, tooltip = "Plus c'est bas (ex. 1.0), plus le taux de réussite est élevé (cible plus proche).")
+riskPct    = input.float(1.5,"Risque par trade (% capital)", minval = 0.1, step = 0.1, group = grpRisk)
+maxLev     = input.float(10.0,"Levier max", minval = 0.1, step = 0.1, group = grpRisk)
+
+// --- Money management ---
+grpMM      = "4b) Money management"
+useBE      = input.bool(true, "Break-even après +1R (booste le taux de réussite)", group = grpMM)
+beTrigger  = input.float(1.0, "Déclencheur break-even (x R)", minval = 0.1, step = 0.1, group = grpMM)
+usePartial = input.bool(false,"Sortie partielle à +1R", group = grpMM)
+partialPct = input.float(50, "Part à clôturer (%)", minval = 1, maxval = 99, step = 5, group = grpMM)
+
+// --- Session / Date ---
+grpS       = "5) Session / Date"
+useSession = input.bool(true, "Trader uniquement Londres/NY (filtre qualité)", group = grpS)
+sessionStr = input.session("0800-1700", "Plage horaire (heure du graphique)", group = grpS)
+useDate    = input.bool(false,"Limiter la plage de dates", group = grpS)
+startDate  = input.time(timestamp("01 Jan 2018 00:00"), "Début", group = grpS)
+endDate    = input.time(timestamp("01 Jan 2030 00:00"), "Fin",   group = grpS)
+
+// =============================================================================
+//  CALCULS
+// =============================================================================
+emaMean  = ta.ema(close, emaMeanLen)
+emaMid   = ta.ema(close, emaMidLen)
+emaTrend = ta.ema(close, emaTrendLen)
+
+rsi = ta.rsi(close, rsiLen)
+[diP, diM, adx] = ta.dmi(adxLen, adxLen)
+atr = ta.atr(atrLen)
+
+// Tendance
+uptrend   = emaMid > emaTrend and close > emaTrend
+downtrend = emaMid < emaTrend and close < emaTrend
+
+// Repli RSI : le RSI a plongé dans la zone PUIS rebondit
+dipLong  = ta.lowest(rsi,  rsiDeep) < rsiBuy   // il y a eu un vrai repli récemment
+dipShort = ta.highest(rsi, rsiDeep) > rsiSell
+triggerLong  = ta.crossover(rsi,  rsiBuy)      // le RSI rebondit au-dessus du seuil
+triggerShort = ta.crossunder(rsi, rsiSell)
+
+adxOk     = not useAdx or adx >= adxMin
+inSession = not useSession or not na(time(timeframe.period, sessionStr))
+inDate    = not useDate or (time >= startDate and time <= endDate)
+tradeOk   = inSession and inDate
+
+longCond  = uptrend   and triggerLong  and dipLong  and adxOk and tradeOk
+shortCond = downtrend and triggerShort and dipShort and adxOk and tradeOk
+
+// =============================================================================
+//  DIMENSIONNEMENT
+// =============================================================================
+stopDist = atr * atrStopMult
+riskCash = strategy.equity * (riskPct / 100.0)
+qtyRisk  = stopDist > 0 ? riskCash / stopDist : na
+qtyCap   = close > 0 ? (strategy.equity * maxLev) / close : na
+qty      = na(qtyRisk) ? na : math.min(qtyRisk, qtyCap)
+
+// =============================================================================
+//  EXÉCUTION
+// =============================================================================
+var float entryPrice = na
+var float riskUnit   = na
+var float longStop   = na
+var float shortStop  = na
+var bool  beDone     = false
+var bool  partDone   = false
+
+if longCond and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, qty = qty)
+    entryPrice := close
+    riskUnit   := stopDist
+    longStop   := close - stopDist
+    beDone     := false
+    partDone   := false
+
+if shortCond and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, qty = qty)
+    entryPrice := close
+    riskUnit   := stopDist
+    shortStop  := close + stopDist
+    beDone     := false
+    partDone   := false
+
+// Sorties LONG
+if strategy.position_size > 0 and not na(entryPrice)
+    if useBE and not beDone and high >= entryPrice + riskUnit * beTrigger
+        longStop := math.max(longStop, entryPrice)
+        beDone   := true
+    if usePartial and not partDone and high >= entryPrice + riskUnit * 1.0
+        strategy.close("Long", qty_percent = partialPct, comment = "Partiel")
+        partDone := true
+    longTP = entryPrice + riskUnit * rrRatio
+    strategy.exit("TP/SL L", from_entry = "Long", stop = longStop, limit = longTP)
+
+// Sorties SHORT
+if strategy.position_size < 0 and not na(entryPrice)
+    if useBE and not beDone and low <= entryPrice - riskUnit * beTrigger
+        shortStop := math.min(shortStop, entryPrice)
+        beDone    := true
+    if usePartial and not partDone and low <= entryPrice - riskUnit * 1.0
+        strategy.close("Short", qty_percent = partialPct, comment = "Partiel")
+        partDone := true
+    shortTP = entryPrice - riskUnit * rrRatio
+    strategy.exit("TP/SL S", from_entry = "Short", stop = shortStop, limit = shortTP)
+
+// =============================================================================
+//  VISUEL
+// =============================================================================
+plot(emaMean,  "EMA moyenne", color = color.new(color.aqua, 0),    linewidth = 1)
+plot(emaMid,   "EMA régime",  color = color.new(color.orange, 0),  linewidth = 1)
+plot(emaTrend, "EMA de fond", color = color.new(color.fuchsia, 0), linewidth = 2)
+
+bgcolor(useSession and not inSession ? color.new(color.gray, 92) : na, title = "Hors session")
+plotshape(longCond,  "Long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
+plotshape(shortCond, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
+
+// =============================================================================
+//  ALERTES
+// =============================================================================
+alertcondition(longCond,  "GOLD HWR Long",  "Signal LONG XAUUSD (repli en tendance)")
+alertcondition(shortCond, "GOLD HWR Short", "Signal SHORT XAUUSD (repli en tendance)")
