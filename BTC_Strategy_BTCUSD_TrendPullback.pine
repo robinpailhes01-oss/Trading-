@@ -1,0 +1,220 @@
+//@version=6
+// =============================================================================
+//  BTC TREND-PULLBACK — BTCUSD
+//  Le moteur PROUVÉ sur l'or, transposé au Bitcoin (asset très tendanciel).
+//  Auteur : Équipe Trading
+//
+//  ──────────────────────────────────────────────────────────────────────────
+//  MÊME LOGIQUE QUE LA STRATÉGIE OR (la seule qui a un edge vérifié) :
+//   - Trend-pullback : on entre sur un repli DANS le sens de la tendance.
+//   - Trailing Supertrend : on laisse courir les gains (R:R asymétrique).
+//   - Gouverneur de drawdown : réduit la taille à -5 %, ARRÊTE à -10 %.
+//
+//  ADAPTÉ AU BTC :
+//   - Marché 24/7 -> filtre session DÉSACTIVÉ (pas de Londres/NY pertinent).
+//   - Volatilité extrême -> le gouverneur de drawdown est ENCORE plus utile
+//     (le Supertrend "tout-en-un" prend -60 % de DD ; ici on borne le risque).
+//   - Supertrend ATR 10 / mult 3 (réglage de référence BTC).
+//
+//  Time frame conseillé : 4H (swing) ou 1D. ⚠️ Backteste sur 3-5 ans.
+//  Symbole : BTCUSD (ou BTCUSDT). Aucune garantie de gain.
+// =============================================================================
+
+strategy(
+     title              = "BTC Trend-Pullback — BTCUSD",
+     shorttitle         = "BTC-TREND",
+     overlay            = true,
+     pyramiding         = 0,
+     initial_capital    = 1000,
+     currency           = currency.EUR,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 100,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 5,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+// =============================================================================
+//  PARAMÈTRES
+// =============================================================================
+grpMA      = "1) Moyennes mobiles"
+emaFastLen = input.int(20,  "EMA rapide (pullback)", minval = 1, group = grpMA)
+emaMidLen  = input.int(50,  "EMA moyenne (régime)",  minval = 1, group = grpMA)
+emaTrendLen= input.int(200, "EMA de fond",           minval = 1, group = grpMA)
+
+grpST      = "2) Supertrend (trailing)"
+stAtrLen   = input.int(10,   "Supertrend ATR",    minval = 1, group = grpST)
+stFactor   = input.float(3.0,"Supertrend facteur",minval = 0.5, step = 0.1, group = grpST)
+
+grpReg     = "3) Filtres de régime"
+useSlope   = input.bool(true, "Filtre pente EMA200", group = grpReg)
+slopeLen   = input.int(20, "Longueur pente", minval = 1, group = grpReg)
+useAdx     = input.bool(true, "Filtre force (ADX)", group = grpReg)
+adxLen     = input.int(14, "ADX longueur", minval = 1, group = grpReg)
+adxMin     = input.float(18, "ADX minimum", minval = 0, group = grpReg)
+
+grpHTF     = "4) Tendance supérieure (MTF)"
+useHTF     = input.bool(false, "Filtre HTF (Supertrend)", group = grpHTF)
+htfTf      = input.timeframe("D", "Time frame supérieur (D = journalier)", group = grpHTF)
+
+grpEntry   = "5) Entrée (pullback)"
+pullbackBars = input.int(6, "Fenêtre de repli (barres)", minval = 1, group = grpEntry)
+
+grpRisk    = "6) Gestion du risque"
+atrLen     = input.int(14,   "ATR longueur",         minval = 1, group = grpRisk)
+atrStopMult= input.float(2.0,"Stop initial (x ATR)", minval = 0.1, step = 0.1, group = grpRisk)
+trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend", "ATR", "Aucun"], group = grpRisk)
+trailAtrMult= input.float(2.5,"Trailing (x ATR)",    minval = 0.1, step = 0.1, group = grpRisk)
+useFixedTP = input.bool(false,"Take profit fixe (sinon trailing pur)", group = grpRisk)
+rrRatio    = input.float(2.5,"Cible TP (x R)",       minval = 0.1, step = 0.1, group = grpRisk)
+riskPct    = input.float(1.5,"Risque par trade (% capital)", minval = 0.1, step = 0.1, group = grpRisk)
+maxLev     = input.float(5.0,"Levier max", minval = 0.1, step = 0.1, group = grpRisk)
+useBE      = input.bool(true, "Break-even après +1R", group = grpRisk)
+usePartial = input.bool(true, "Sortie partielle à +1R", group = grpRisk)
+partialPct = input.float(50, "Part à clôturer (%)", minval = 1, maxval = 99, step = 5, group = grpRisk)
+
+grpDD      = "6b) Gouverneur de capital"
+useGov     = input.bool(true, "Activer le gouverneur de drawdown", group = grpDD)
+reduceDD   = input.float(5.0, "Réduire la taille à ... % de DD", minval = 0.1, step = 0.5, group = grpDD)
+reduceFac  = input.float(0.5, "Facteur de réduction", minval = 0.1, maxval = 1.0, step = 0.1, group = grpDD)
+maxDD      = input.float(10.0,"KILL SWITCH : stop des entrées à ... % de DD", minval = 0.5, step = 0.5, group = grpDD)
+
+grpS       = "7) Session / Date"
+useSession = input.bool(false,"Filtre session (laisse OFF : BTC = 24/7)", group = grpS)
+sessionStr = input.session("0000-2400", "Plage horaire", group = grpS)
+useDate    = input.bool(false,"Limiter la plage de dates", group = grpS)
+startDate  = input.time(timestamp("01 Jan 2017 00:00"), "Début", group = grpS)
+endDate    = input.time(timestamp("01 Jan 2030 00:00"), "Fin",   group = grpS)
+
+// =============================================================================
+//  CALCULS
+// =============================================================================
+emaFast  = ta.ema(close, emaFastLen)
+emaMid   = ta.ema(close, emaMidLen)
+emaTrend = ta.ema(close, emaTrendLen)
+
+[stLine, stDir] = ta.supertrend(stFactor, stAtrLen)
+stBull = stDir < 0
+stBear = stDir > 0
+
+[diP, diM, adx] = ta.dmi(adxLen, adxLen)
+atr = ta.atr(atrLen)
+
+[htfLine, htfDir] = request.security(syminfo.tickerid, htfTf, ta.supertrend(stFactor, stAtrLen), lookahead = barmerge.lookahead_off)
+htfBull = not useHTF or htfDir[1] < 0
+htfBear = not useHTF or htfDir[1] > 0
+
+regimeUp   = emaMid > emaTrend and close > emaTrend
+regimeDown = emaMid < emaTrend and close < emaTrend
+slopeUp    = not useSlope or emaTrend > emaTrend[slopeLen]
+slopeDown  = not useSlope or emaTrend < emaTrend[slopeLen]
+adxOk      = not useAdx or adx >= adxMin
+
+inSession = not useSession or not na(time(timeframe.period, sessionStr))
+inDate    = not useDate or (time >= startDate and time <= endDate)
+
+// --- Gouverneur de capital ---
+var float peakEq = na
+peakEq := na(peakEq) ? strategy.equity : math.max(peakEq, strategy.equity)
+ddFrac = peakEq > 0 ? (peakEq - strategy.equity) / peakEq : 0.0
+govReduce = useGov and ddFrac >= reduceDD / 100.0
+govHalt   = useGov and ddFrac >= maxDD / 100.0
+riskFactor = govReduce ? reduceFac : 1.0
+
+tradeOk = inSession and inDate and not govHalt
+
+// --- Entrée trend-pullback ---
+triggerUp   = ta.crossover(close, emaFast)
+triggerDown = ta.crossunder(close, emaFast)
+pulledBackLong  = ta.lowest(close, pullbackBars) < emaFast
+pulledBackShort = ta.highest(close, pullbackBars) > emaFast
+
+longCond  = regimeUp   and slopeUp   and stBull and htfBull and adxOk and triggerUp   and pulledBackLong  and tradeOk
+shortCond = regimeDown and slopeDown and stBear and htfBear and adxOk and triggerDown and pulledBackShort and tradeOk
+
+// =============================================================================
+//  DIMENSIONNEMENT
+// =============================================================================
+stopDist = atr * atrStopMult
+riskCash = strategy.equity * (riskPct / 100.0) * riskFactor
+qtyRisk  = stopDist > 0 ? riskCash / stopDist : na
+qtyCap   = close > 0 ? (strategy.equity * maxLev) / close : na
+qty      = na(qtyRisk) ? na : math.min(qtyRisk, qtyCap)
+
+// =============================================================================
+//  EXÉCUTION
+// =============================================================================
+var float entryPrice = na
+var float riskUnit   = na
+var float longStop   = na
+var float shortStop  = na
+var bool  beDone     = false
+var bool  partDone   = false
+
+if longCond and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, qty = qty)
+    entryPrice := close
+    riskUnit   := stopDist
+    longStop   := close - stopDist
+    beDone     := false
+    partDone   := false
+
+if shortCond and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, qty = qty)
+    entryPrice := close
+    riskUnit   := stopDist
+    shortStop  := close + stopDist
+    beDone     := false
+    partDone   := false
+
+// Sorties LONG
+if strategy.position_size > 0 and not na(entryPrice)
+    trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close - atr * trailAtrMult : na
+    if not na(trail)
+        longStop := math.max(longStop, trail)
+    if useBE and not beDone and high >= entryPrice + riskUnit
+        longStop := math.max(longStop, entryPrice)
+        beDone   := true
+    if usePartial and not partDone and high >= entryPrice + riskUnit
+        strategy.close("Long", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
+    longTP = entryPrice + riskUnit * rrRatio
+    strategy.exit("Sortie L", from_entry = "Long", stop = longStop, limit = useFixedTP ? longTP : na)
+
+// Sorties SHORT
+if strategy.position_size < 0 and not na(entryPrice)
+    trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close + atr * trailAtrMult : na
+    if not na(trail)
+        shortStop := math.min(shortStop, trail)
+    if useBE and not beDone and low <= entryPrice - riskUnit
+        shortStop := math.min(shortStop, entryPrice)
+        beDone    := true
+    if usePartial and not partDone and low <= entryPrice - riskUnit
+        strategy.close("Short", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
+    shortTP = entryPrice - riskUnit * rrRatio
+    strategy.exit("Sortie S", from_entry = "Short", stop = shortStop, limit = useFixedTP ? shortTP : na)
+
+// =============================================================================
+//  VISUEL
+// =============================================================================
+plot(emaFast,  "EMA rapide",  color = color.new(color.aqua, 0),    linewidth = 1)
+plot(emaMid,   "EMA moyenne", color = color.new(color.orange, 0),  linewidth = 1)
+plot(emaTrend, "EMA de fond", color = color.new(color.fuchsia, 0), linewidth = 2)
+plot(stLine, "Supertrend", color = stBull ? color.new(color.green, 0) : color.new(color.red, 0), style = plot.style_linebr)
+
+bgcolor(govHalt ? color.new(color.red, 80) : govReduce ? color.new(color.orange, 88) : na, title = "Gouverneur actif")
+plotshape(longCond,  "Long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
+plotshape(shortCond, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
+
+var table info = table.new(position.top_right, 1, 2, border_width = 1)
+if barstate.islast
+    table.cell(info, 0, 0, "Drawdown : " + str.tostring(ddFrac * 100, "#.#") + " %", text_color = color.white, bgcolor = govHalt ? color.red : govReduce ? color.orange : color.new(color.green, 30))
+    table.cell(info, 0, 1, govHalt ? "KILL SWITCH actif" : govReduce ? "Taille réduite" : "Normal", text_color = color.white, bgcolor = color.new(color.black, 20))
+
+// =============================================================================
+//  ALERTES
+// =============================================================================
+alertcondition(longCond,  "BTC Long",  "Signal LONG BTCUSD (pullback en tendance)")
+alertcondition(shortCond, "BTC Short", "Signal SHORT BTCUSD (pullback en tendance)")
