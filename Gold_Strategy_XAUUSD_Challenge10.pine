@@ -1,30 +1,25 @@
 //@version=6
 // =============================================================================
-//  GOLD CHALLENGE 10% — XAUUSD
-//  Objectif du DÉFI : 2-5 trades/semaine GAGNANTS, petits gains réguliers,
-//  drawdown maximal PLAFONNÉ à 10 % du capital. Capital de test, patient.
+//  GOLD CHALLENGE 10% v2 — XAUUSD
+//  Objectif du DÉFI : 2-5 trades/semaine, edge POSITIF, drawdown plafonné 10 %.
 //  Auteur : Équipe Trading
 //
 //  ──────────────────────────────────────────────────────────────────────────
-//  FONDÉ SUR 3 AXES DE RECHERCHE :
+//  LEÇON DU BACKTEST : la "cible serrée = fort taux de réussite" a ÉCHOUÉ sur
+//  l'or (36 % de réussite, PF 0.57). Le SEUL edge positif vérifié sur gros
+//  échantillon = TREND-PULLBACK + TRAILING SUPERTREND (laisser courir les gains).
+//   - 4H Sniper : PF 1.7 / 64 trades
+//   - 30m base  : PF 1.3 / 218 trades (~3 trades/semaine)  <-- cette config
 //
-//  1) ENTRÉE (le seul edge VÉRIFIÉ sur l'or, ~296 trades, PF 1.18-1.64) :
-//     repli RSI DANS le sens de la tendance + pullback vers l'EMA21.
-//     (Les "90 % de réussite" du net sont du curve-fit ; plafond honnête ~58-68 %.)
+//  CETTE VERSION = le moteur 30m gagnant + le GOUVERNEUR DE DRAWDOWN :
+//   - réduit la taille à -5 % de drawdown
+//   - ARRÊTE les entrées à -10 % (kill switch) -> plafonne ta perte
 //
-//  2) FRÉQUENCE 2-5/semaine : signal 1H + filtre tendance 4H + session
-//     Londres/NY (08:00-16:00). Resserre sur l'overlap 12:00-16:00 si trop actif.
-//
-//  3) MONEY MANAGEMENT (cap 10 %) : drawdown ≈ risque% × série de pertes.
-//     À 1 %/trade, une série de 8-10 pertes ≈ 8-10 % -> on ajoute un
-//     GOUVERNEUR DE CAPITAL : réduit la taille après un repli, et
-//     ARRÊTE les nouvelles entrées si le capital perd 10 % (kill switch).
-//
-//  ⚠️ Aucune garantie de gain. Time frame : 1H. Backtest sur 2-3 ans.
+//  ⚠️ Aucune garantie de gain. Time frame : 30 min (objectif 2-5 trades/sem).
 // =============================================================================
 
 strategy(
-     title              = "Gold Challenge 10% — XAUUSD",
+     title              = "Gold Challenge 10% v2 — XAUUSD",
      shorttitle         = "GOLD-DEFI-10",
      overlay            = true,
      pyramiding         = 0,
@@ -41,53 +36,52 @@ strategy(
 // =============================================================================
 //  PARAMÈTRES
 // =============================================================================
+grpMA      = "1) Moyennes mobiles"
+emaFastLen = input.int(20,  "EMA rapide (pullback)", minval = 1, group = grpMA)
+emaMidLen  = input.int(50,  "EMA moyenne (régime)",  minval = 1, group = grpMA)
+emaTrendLen= input.int(200, "EMA de fond",           minval = 1, group = grpMA)
 
-// --- Tendance / Moyennes ---
-grpT       = "1) Tendance"
-emaPullLen = input.int(21,  "EMA pullback",  minval = 1, group = grpT)
-emaMidLen  = input.int(50,  "EMA tendance",  minval = 1, group = grpT)
-emaTrendLen= input.int(200, "EMA de fond",   minval = 1, group = grpT)
-usePull    = input.bool(true,"Exiger un pullback vers l'EMA21", group = grpT, tooltip = "Le prix doit avoir touché l'EMA21 récemment (vrai repli).")
-pullBars   = input.int(6,   "Fenêtre de pullback (barres)", minval = 1, group = grpT)
+grpST      = "2) Supertrend (trailing)"
+stAtrLen   = input.int(10,   "Supertrend ATR",    minval = 1, group = grpST)
+stFactor   = input.float(3.0,"Supertrend facteur",minval = 0.5, step = 0.1, group = grpST)
 
-// --- Filtre tendance supérieure (4H) ---
-grpHTF     = "2) Tendance 4H"
-useHTF     = input.bool(true, "Filtre tendance 4H (EMA200)", group = grpHTF)
+grpReg     = "3) Filtres de régime"
+useSlope   = input.bool(true, "Filtre pente EMA200", group = grpReg)
+slopeLen   = input.int(20, "Longueur pente", minval = 1, group = grpReg)
+useAdx     = input.bool(true, "Filtre force (ADX)", group = grpReg)
+adxLen     = input.int(14, "ADX longueur", minval = 1, group = grpReg)
+adxMin     = input.float(18, "ADX minimum", minval = 0, group = grpReg)
+
+grpHTF     = "4) Tendance supérieure (MTF)"
+useHTF     = input.bool(false, "Filtre HTF (laisse OFF en 30m sinon trop peu de trades)", group = grpHTF)
 htfTf      = input.timeframe("240", "Time frame supérieur", group = grpHTF)
 
-// --- Repli RSI ---
-grpR       = "3) Repli RSI"
-rsiLen     = input.int(14, "RSI longueur", minval = 1, group = grpR)
-rsiBuy     = input.int(45, "Seuil ACHAT (RSI remonte au-dessus)", minval = 1, maxval = 100, group = grpR)
-rsiSell    = input.int(55, "Seuil VENTE (RSI redescend en-dessous)", minval = 1, maxval = 100, group = grpR)
-rsiDeep    = input.int(8,  "Profondeur de repli (barres)", minval = 1, group = grpR)
+grpEntry   = "5) Entrée (pullback)"
+pullbackBars = input.int(6, "Fenêtre de repli (barres)", minval = 1, group = grpEntry)
 
-// --- Filtre force ---
-grpF       = "4) Filtre force"
-useAdx     = input.bool(true, "Filtre ADX", group = grpF)
-adxLen     = input.int(14, "ADX longueur", minval = 1, group = grpF)
-adxMin     = input.float(18, "ADX minimum", minval = 0, group = grpF)
-
-// --- Risque / Cible ---
-grpRisk    = "5) Risque & cible"
-atrLen     = input.int(14,   "ATR longueur",            minval = 1, group = grpRisk)
-atrStopMult= input.float(1.5,"Stop (x ATR)",            minval = 0.1, step = 0.1, group = grpRisk)
-rrRatio    = input.float(1.3,"Cible Take Profit (x R)", minval = 0.1, step = 0.1, group = grpRisk, tooltip = "Cible serrée = plus de trades gagnants (petits gains). Monte-la pour viser plus gros.")
+grpRisk    = "6) Gestion du risque"
+atrLen     = input.int(14,   "ATR longueur",         minval = 1, group = grpRisk)
+atrStopMult= input.float(2.0,"Stop initial (x ATR)", minval = 0.1, step = 0.1, group = grpRisk)
+trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend", "ATR", "Aucun"], group = grpRisk)
+trailAtrMult= input.float(2.5,"Trailing (x ATR)",    minval = 0.1, step = 0.1, group = grpRisk)
+useFixedTP = input.bool(false,"Take profit fixe (sinon trailing pur)", group = grpRisk)
+rrRatio    = input.float(2.5,"Cible TP (x R)",       minval = 0.1, step = 0.1, group = grpRisk)
 riskPct    = input.float(1.0,"Risque par trade (% capital)", minval = 0.1, step = 0.1, group = grpRisk)
 maxLev     = input.float(10.0,"Levier max", minval = 0.1, step = 0.1, group = grpRisk)
 useBE      = input.bool(true, "Break-even après +1R", group = grpRisk)
+usePartial = input.bool(true, "Sortie partielle à +1R", group = grpRisk)
+partialPct = input.float(50, "Part à clôturer (%)", minval = 1, maxval = 99, step = 5, group = grpRisk)
 
 // --- GOUVERNEUR DE DRAWDOWN (le cœur du défi 10 %) ---
-grpDD      = "5b) Gouverneur de capital (DÉFI 10%)"
+grpDD      = "6b) Gouverneur de capital (DÉFI 10%)"
 useGov     = input.bool(true, "Activer le gouverneur de drawdown", group = grpDD)
-reduceDD   = input.float(5.0, "Réduire la taille à partir de ... % de drawdown", minval = 0.1, step = 0.5, group = grpDD)
-reduceFac  = input.float(0.5, "Facteur de réduction (0.5 = moitié)", minval = 0.1, maxval = 1.0, step = 0.1, group = grpDD)
-maxDD      = input.float(10.0,"KILL SWITCH : stop des entrées à ... % de drawdown", minval = 0.5, step = 0.5, group = grpDD, tooltip = "Au-delà de ce drawdown, plus aucune nouvelle entrée. C'est ce qui plafonne ta perte.")
+reduceDD   = input.float(5.0, "Réduire la taille à partir de ... % de DD", minval = 0.1, step = 0.5, group = grpDD)
+reduceFac  = input.float(0.5, "Facteur de réduction", minval = 0.1, maxval = 1.0, step = 0.1, group = grpDD)
+maxDD      = input.float(10.0,"KILL SWITCH : stop des entrées à ... % de DD", minval = 0.5, step = 0.5, group = grpDD)
 
-// --- Session / Date ---
-grpS       = "6) Session / Date"
-useSession = input.bool(true, "Trader uniquement Londres/NY", group = grpS)
-sessionStr = input.session("0800-1600", "Plage horaire (heure du graphique)", group = grpS)
+grpS       = "7) Session / Date"
+useSession = input.bool(false,"Trader uniquement sur une plage horaire", group = grpS)
+sessionStr = input.session("0800-1600", "Plage horaire", group = grpS)
 useDate    = input.bool(false,"Limiter la plage de dates", group = grpS)
 startDate  = input.time(timestamp("01 Jan 2018 00:00"), "Début", group = grpS)
 endDate    = input.time(timestamp("01 Jan 2030 00:00"), "Fin",   group = grpS)
@@ -95,58 +89,51 @@ endDate    = input.time(timestamp("01 Jan 2030 00:00"), "Fin",   group = grpS)
 // =============================================================================
 //  CALCULS
 // =============================================================================
-emaPull  = ta.ema(close, emaPullLen)
+emaFast  = ta.ema(close, emaFastLen)
 emaMid   = ta.ema(close, emaMidLen)
 emaTrend = ta.ema(close, emaTrendLen)
 
-rsi = ta.rsi(close, rsiLen)
+[stLine, stDir] = ta.supertrend(stFactor, stAtrLen)
+stBull = stDir < 0
+stBear = stDir > 0
+
 [diP, diM, adx] = ta.dmi(adxLen, adxLen)
 atr = ta.atr(atrLen)
 
-// Filtre 4H : tendance supérieure via EMA200 du time frame supérieur
-htfEma = request.security(syminfo.tickerid, htfTf, ta.ema(close, emaTrendLen), lookahead = barmerge.lookahead_off)
-htfBull = not useHTF or close > htfEma
-htfBear = not useHTF or close < htfEma
+[htfLine, htfDir] = request.security(syminfo.tickerid, htfTf, ta.supertrend(stFactor, stAtrLen), lookahead = barmerge.lookahead_off)
+htfBull = not useHTF or htfDir[1] < 0
+htfBear = not useHTF or htfDir[1] > 0
 
-// Tendance locale
-uptrend   = emaMid > emaTrend and close > emaTrend
-downtrend = emaMid < emaTrend and close < emaTrend
+regimeUp   = emaMid > emaTrend and close > emaTrend
+regimeDown = emaMid < emaTrend and close < emaTrend
+slopeUp    = not useSlope or emaTrend > emaTrend[slopeLen]
+slopeDown  = not useSlope or emaTrend < emaTrend[slopeLen]
+adxOk      = not useAdx or adx >= adxMin
 
-// Pullback vers l'EMA21 (le prix l'a touchée récemment)
-touchedPullLong  = not usePull or ta.lowest(low,  pullBars) <= emaPull
-touchedPullShort = not usePull or ta.highest(high, pullBars) >= emaPull
-
-// Repli RSI : a plongé dans la zone PUIS rebondit
-dipLong  = ta.lowest(rsi,  rsiDeep) < rsiBuy
-dipShort = ta.highest(rsi, rsiDeep) > rsiSell
-triggerLong  = ta.crossover(rsi,  rsiBuy)
-triggerShort = ta.crossunder(rsi, rsiSell)
-
-adxOk     = not useAdx or adx >= adxMin
 inSession = not useSession or not na(time(timeframe.period, sessionStr))
 inDate    = not useDate or (time >= startDate and time <= endDate)
 
-// =============================================================================
-//  GOUVERNEUR DE CAPITAL
-//  - suit le sommet de capital, calcule le drawdown courant
-//  - réduit la taille au-delà de reduceDD %
-//  - bloque les nouvelles entrées au-delà de maxDD % (kill switch)
-// =============================================================================
+// --- Gouverneur de capital ---
 var float peakEq = na
 peakEq := na(peakEq) ? strategy.equity : math.max(peakEq, strategy.equity)
 ddFrac = peakEq > 0 ? (peakEq - strategy.equity) / peakEq : 0.0
-
 govReduce = useGov and ddFrac >= reduceDD / 100.0
 govHalt   = useGov and ddFrac >= maxDD / 100.0
 riskFactor = govReduce ? reduceFac : 1.0
 
 tradeOk = inSession and inDate and not govHalt
 
-longCond  = uptrend   and htfBull and triggerLong  and dipLong  and touchedPullLong  and adxOk and tradeOk
-shortCond = downtrend and htfBear and triggerShort and dipShort and touchedPullShort and adxOk and tradeOk
+// --- Entrée : trend-pullback (le moteur PROUVÉ) ---
+triggerUp   = ta.crossover(close, emaFast)
+triggerDown = ta.crossunder(close, emaFast)
+pulledBackLong  = ta.lowest(close, pullbackBars) < emaFast
+pulledBackShort = ta.highest(close, pullbackBars) > emaFast
+
+longCond  = regimeUp   and slopeUp   and stBull and htfBull and adxOk and triggerUp   and pulledBackLong  and tradeOk
+shortCond = regimeDown and slopeDown and stBear and htfBear and adxOk and triggerDown and pulledBackShort and tradeOk
 
 // =============================================================================
-//  DIMENSIONNEMENT (risque ATR + facteur gouverneur + plafond de levier)
+//  DIMENSIONNEMENT
 // =============================================================================
 stopDist = atr * atrStopMult
 riskCash = strategy.equity * (riskPct / 100.0) * riskFactor
@@ -162,6 +149,7 @@ var float riskUnit   = na
 var float longStop   = na
 var float shortStop  = na
 var bool  beDone     = false
+var bool  partDone   = false
 
 if longCond and strategy.position_size <= 0
     strategy.entry("Long", strategy.long, qty = qty)
@@ -169,6 +157,7 @@ if longCond and strategy.position_size <= 0
     riskUnit   := stopDist
     longStop   := close - stopDist
     beDone     := false
+    partDone   := false
 
 if shortCond and strategy.position_size >= 0
     strategy.entry("Short", strategy.short, qty = qty)
@@ -176,36 +165,49 @@ if shortCond and strategy.position_size >= 0
     riskUnit   := stopDist
     shortStop  := close + stopDist
     beDone     := false
+    partDone   := false
 
-// Sorties LONG
+// Sorties LONG : trailing Supertrend (laisse courir) + BE + partielle
 if strategy.position_size > 0 and not na(entryPrice)
+    trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close - atr * trailAtrMult : na
+    if not na(trail)
+        longStop := math.max(longStop, trail)
     if useBE and not beDone and high >= entryPrice + riskUnit
         longStop := math.max(longStop, entryPrice)
         beDone   := true
+    if usePartial and not partDone and high >= entryPrice + riskUnit
+        strategy.close("Long", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
     longTP = entryPrice + riskUnit * rrRatio
-    strategy.exit("TP/SL L", from_entry = "Long", stop = longStop, limit = longTP)
+    strategy.exit("Sortie L", from_entry = "Long", stop = longStop, limit = useFixedTP ? longTP : na)
 
 // Sorties SHORT
 if strategy.position_size < 0 and not na(entryPrice)
+    trail = trailMode == "Supertrend" ? stLine : trailMode == "ATR" ? close + atr * trailAtrMult : na
+    if not na(trail)
+        shortStop := math.min(shortStop, trail)
     if useBE and not beDone and low <= entryPrice - riskUnit
         shortStop := math.min(shortStop, entryPrice)
         beDone    := true
+    if usePartial and not partDone and low <= entryPrice - riskUnit
+        strategy.close("Short", qty_percent = partialPct, comment = "Partiel +R")
+        partDone := true
     shortTP = entryPrice - riskUnit * rrRatio
-    strategy.exit("TP/SL S", from_entry = "Short", stop = shortStop, limit = shortTP)
+    strategy.exit("Sortie S", from_entry = "Short", stop = shortStop, limit = useFixedTP ? shortTP : na)
 
 // =============================================================================
 //  VISUEL
 // =============================================================================
-plot(emaPull,  "EMA pullback", color = color.new(color.aqua, 0),    linewidth = 1)
-plot(emaMid,   "EMA tendance", color = color.new(color.orange, 0),  linewidth = 1)
-plot(emaTrend, "EMA de fond",  color = color.new(color.fuchsia, 0), linewidth = 2)
+plot(emaFast,  "EMA rapide",  color = color.new(color.aqua, 0),    linewidth = 1)
+plot(emaMid,   "EMA moyenne", color = color.new(color.orange, 0),  linewidth = 1)
+plot(emaTrend, "EMA de fond", color = color.new(color.fuchsia, 0), linewidth = 2)
+plot(stLine, "Supertrend", color = stBull ? color.new(color.green, 0) : color.new(color.red, 0), style = plot.style_linebr)
 
 bgcolor(useSession and not inSession ? color.new(color.gray, 92) : na, title = "Hors session")
 bgcolor(govHalt ? color.new(color.red, 80) : govReduce ? color.new(color.orange, 88) : na, title = "Gouverneur actif")
 plotshape(longCond,  "Long",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
 plotshape(shortCond, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
 
-// Tableau d'état (drawdown courant)
 var table info = table.new(position.top_right, 1, 2, border_width = 1)
 if barstate.islast
     table.cell(info, 0, 0, "Drawdown : " + str.tostring(ddFrac * 100, "#.#") + " %", text_color = color.white, bgcolor = govHalt ? color.red : govReduce ? color.orange : color.new(color.green, 30))
@@ -214,5 +216,5 @@ if barstate.islast
 // =============================================================================
 //  ALERTES
 // =============================================================================
-alertcondition(longCond,  "GOLD Défi Long",  "Signal LONG XAUUSD (repli en tendance)")
-alertcondition(shortCond, "GOLD Défi Short", "Signal SHORT XAUUSD (repli en tendance)")
+alertcondition(longCond,  "GOLD Défi Long",  "Signal LONG XAUUSD (pullback en tendance)")
+alertcondition(shortCond, "GOLD Défi Short", "Signal SHORT XAUUSD (pullback en tendance)")
