@@ -60,7 +60,8 @@ rsiMid     = input.int(50, "RSI seuil", minval = 1, maxval = 100, group = grpReg
 
 // --- SUPPORT / RÉSISTANCE (price action) ---
 grpSR      = "3b) Support / Résistance"
-useSR      = input.bool(true, "Activer filtre Support/Résistance (pivots)", group = grpSR, tooltip = "Bloque les entrées sans 'place pour courir' : pas d'achat juste sous une résistance, pas de vente juste au-dessus d'un support.")
+useSR      = input.bool(true, "Afficher les supports/résistances", group = grpSR, tooltip = "Affiche les niveaux de pivots sur le graphique.")
+srBlock    = input.bool(false,"BLOQUER les entrées contre une zone proche", group = grpSR, tooltip = "DÉSACTIVÉ par défaut. Si activé : pas d'achat juste sous une résistance, pas de vente juste au-dessus d'un support. Peut réduire fortement le nombre de trades.")
 pivLen     = input.int(10, "Sensibilité pivots (barres G/D)", minval = 2, group = grpSR, tooltip = "Plus grand = supports/résistances majeurs ; plus petit = niveaux plus fréquents.")
 srRoom     = input.float(1.0, "Place minimale vers la zone opposée (x ATR)", minval = 0.0, step = 0.1, group = grpSR, tooltip = "Distance minimale qu'il faut avoir avant la résistance (long) / le support (short). Mettre 0 pour désactiver le blocage.")
 srStop     = input.bool(false,"Placer le stop sous le support / au-dessus de la résistance", group = grpSR, tooltip = "Stop logique calé sur le niveau S/R (peut donner des stops larges -> positions plus petites).")
@@ -140,8 +141,8 @@ if not na(pl)
 // - Short : symétrique avec le support en-dessous.
 resAbove = not na(resLevel) and resLevel > close
 supBelow = not na(supLevel) and supLevel < close
-roomLong  = not useSR or not resAbove or (resLevel - close) >= srRoom * atr
-roomShort = not useSR or not supBelow or (close - supLevel) >= srRoom * atr
+roomLong  = not srBlock or not resAbove or (resLevel - close) >= srRoom * atr
+roomShort = not srBlock or not supBelow or (close - supLevel) >= srRoom * atr
 
 // --- Régime de tendance ---
 regimeUp   = emaMid > emaTrend and close > emaTrend
