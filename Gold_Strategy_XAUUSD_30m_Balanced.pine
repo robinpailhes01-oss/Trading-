@@ -77,7 +77,7 @@ useFixedTP = input.bool(false,"Take profit fixe (sinon trailing pur)", group = g
 rrRatio    = input.float(2.5,"Ratio Risque/Récompense (TP)",minval = 0.1, step = 0.1, group = grpRisk)
 trailMode  = input.string("Supertrend", "Mode trailing", options = ["Supertrend", "ATR", "Aucun"], group = grpRisk)
 trailAtrMult= input.float(2.5,"Trailing (x ATR)",          minval = 0.1, step = 0.1, group = grpRisk)
-riskPct    = input.float(2.5,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
+riskPct    = input.float(3.0,"Risque par trade (% capital)",minval = 0.1, step = 0.1, group = grpRisk)
 
 // --- Money management ---
 grpMM      = "6b) Money management"

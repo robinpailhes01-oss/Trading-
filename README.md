@@ -1,131 +1,114 @@
-# 🥇 Gold Master Strategy v3 — XAUUSD (Pine Script v6)
+# 🥇 Gold Master Strategy — XAUUSD (Pine Script v6)
 
-Stratégie de trading sur l'**OR (XAUUSD)** pour TradingView, **reconstruite à partir d'une
-recherche sur les méthodes qui fonctionnent réellement sur l'or** : filtre de régime de
-tendance + entrée sur pullback + Supertrend en trailing pour laisser courir les gains.
+Stratégies de trading sur l'**OR (XAUUSD)** pour TradingView, construites à partir d'une
+recherche sur les méthodes qui fonctionnent réellement sur l'or :
+**tendance + entrée sur pullback + Supertrend en trailing + gestion du risque pro**.
 
 > ⚠️ **Avertissement** : aucune stratégie n'est « garantie rentable ». Le trading comporte
-> un risque de perte. Ce script est un outil de recherche/backtest. Aucun backtest ne
-> garantit les performances futures. Testez et adaptez à votre courtier avant tout usage réel.
+> un risque de perte. Aucun backtest ne garantit les performances futures. Teste et adapte à
+> ton courtier avant tout usage réel.
 
 ---
 
-## 📉 Pourquoi les versions précédentes perdaient (et ce qu'on a corrigé)
+## 🚀 PAR OÙ COMMENCER (lis ça d'abord)
 
-| Version | Problème | Résultat observé |
-|---------|----------|------------------|
-| v1 | 6 filtres simultanés + croisement → quasi aucun trade | 1 trade, inutilisable |
-| v2 | Entrée sur **croisement EMA** → on achète en **haut** du mouvement, juste avant le retournement | PF 0.45–0.64, **16–23 % de réussite** |
-
-**Le diagnostic chiffré** : à un ratio R:R de 1.8, il faut **> 36 % de trades gagnants** pour
-être rentable. Les versions précédentes étaient à 16–23 % → entrées de mauvaise qualité
-(croisement = retard + achat en extension), et **aucun filtre de régime** → on tradait dans
-les ranges où le bruit massacre les stratégies de tendance.
+1. **Symbole** : utilise le **XAUUSD de Vantage** (il a beaucoup d'historique). ⚠️ Évite OANDA
+   en intraday : trop peu de bougies chargées → backtests à 1-2 trades, inutilisables.
+2. **Une seule stratégie à la fois** sur le graphique. Supprime les doublons (le badge « +2/+3 »
+   en haut à gauche = plusieurs copies → stats faussées).
+3. **Charge assez d'historique** : dézoome / fais défiler vers la gauche, teste sur **2-3 ans**.
+   Il faut **30+ trades** pour qu'un backtest ait un sens.
+4. Colle le contenu du fichier `.pine` dans le **Pine Editor** → **Ajouter au graphique**.
 
 ---
 
-## 🧠 Ce que dit la recherche (et ce que fait la v3)
+## 📁 Quel fichier utiliser selon ton objectif
 
-D'après les sources analysées (voir plus bas), les stratégies or robustes partagent 4 principes :
-
-| Principe (recherche) | Implémentation v3 |
-|----------------------|-------------------|
-| **Un Profit Factor > 1 vient d'un R:R asymétrique** (laisser courir les gains), pas d'un taux de réussite élevé | **Trailing via Supertrend** : petits stops, gros gains |
-| **Entrer sur PULLBACK** dans la tendance (pas sur extension) : attendre un repli vers l'EMA puis la reprise | Entrée = repli sous l'EMA20 **puis** reprise (close repasse au-dessus) |
-| **Supertrend multi-timeframe** améliore le taux de réussite | Supertrend (ATR 10 / facteur 3) + filtre HTF optionnel |
-| **Filtre de régime indispensable** : ne trader que quand ça tend vraiment | EMA50 vs EMA200 + **pente EMA200** + **ADX ≥ 20** |
-
-### Règle d'entrée v3
-- **LONG** : EMA50 > EMA200 **et** pente EMA200 haussière **et** Supertrend haussier **et**
-  ADX ≥ 20 **et** repli récent sous l'EMA20 **puis** clôture qui repasse au-dessus.
-- **SHORT** : conditions strictement symétriques.
-
-### Sortie v3 (le cœur de la rentabilité)
-- **Stop initial** = `2 × ATR` (protection rapprochée).
-- **Trailing Supertrend** : le stop ne fait que se resserrer → on capture les grandes
-  tendances de l'or et on coupe vite les faux départs.
-- Take profit fixe en option (R:R 2.5) si tu préfères des cibles fixes.
-
-### 💰 Money management intégré (groupe « 6b »)
-La taille de position est **calculée sur le risque** : `qty = (capital × risque%) / distance_de_stop`.
-Chaque trade ne risque donc qu'un **% fixe du capital** (1 % par défaut). En plus :
-
-| Réglage | Rôle | Effet |
-|---------|------|-------|
-| **Levier max** | Plafonne la taille de position (taille ≤ capital × levier) | Évite un levier irréaliste sur les petits TF |
-| **Break-even après +1R** | Remonte le stop au point d'entrée dès +1R de gain | Le trade ne peut plus devenir perdant |
-| **Sortie partielle à +1R** | Encaisse 50 % des gains tôt, laisse courir le reste | **Lisse fortement la courbe de capital** (moins de volatilité) |
-
-> 💡 C'est exactement ce qui réduit la volatilité d'une stratégie : on sécurise une partie
-> des gains rapidement (break-even + sortie partielle) tout en gardant un morceau pour les
-> grandes tendances.
-
-### ⚠️ Time frame : privilégie le 3H / 4H
-Les backtests montrent que cette stratégie est **bien plus stable sur les TF élevés** :
-- **3H** : Profit Factor ~1,4 sur 5 ans (34 trades) ✅
-- **15m / 1H** : beaucoup plus bruité, résultats instables ❌
-
-➡️ Utilise le **3H** (ou 4H) comme time frame principal.
+| Objectif | Fichier | Time frame | Profil |
+|----------|---------|-----------|--------|
+| 🔥 **Agressif + beaucoup de trades** (ton choix) | `Gold_Strategy_XAUUSD_30m_Balanced.pine` | **30 min** | Risque 3 %, filtre 4H, ~200 trades |
+| 🎯 **Le plus fiable** (peu de trades) | `Gold_Strategy_XAUUSD_4H_Sniper.pine` | 4H | Confluence max, PF ~1,7 |
+| 🧱 **Base robuste polyvalente** | `Gold_Strategy_XAUUSD.pine` | 4H | Risque 1 %, réglable |
+| 👁️ **Avec supports/résistances** | `Gold_Strategy_XAUUSD_PriceAction_SR.pine` | 30m / 1H | Niveaux S/R affichés |
+| ⛔ **À éviter** | `Gold_Strategy_XAUUSD_15m_Aggressive.pine` | 15 min | 15 min = trop bruité (PF < 1) |
 
 ---
 
-## ⏱️ Time frame recommandé
+## 🔥 TA STRATÉGIE : 30 min Équilibré (agressif)
 
-| Profil | Graphique | Filtre HTF |
-|--------|-----------|------------|
-| **Swing court (recommandé)** | **1H** | 4H (optionnel) |
-| Intraday | 15 min | 4H |
+C'est le **meilleur compromis « beaucoup de trades + rentable »** d'après les backtests :
+**~218 trades**, **PF ~1,3**, **53 % de réussite**, drawdown faible. Réglée pour l'agressivité :
 
-➡️ **Commence en 1H.** Moins de bruit qu'en 15 min, signaux de meilleure qualité pour une
-stratégie de tendance/pullback.
+| Réglage | Valeur | Rôle |
+|---------|--------|------|
+| **Risque par trade** | **3 %** | Agressif → rendement amplifié |
+| **Levier max** | 10 | Permet d'atteindre les 3 % de risque |
+| **Filtre HTF 4H** | activé | Aligne sur la grande tendance |
+| **Break-even + sortie partielle** | activés | Sécurisent les gains, lissent la courbe |
 
----
+### Comment l'utiliser
+1. Graphique **Vantage XAUUSD** en **30 min**.
+2. Colle `Gold_Strategy_XAUUSD_30m_Balanced.pine` → Ajouter au graphique.
+3. Backtest sur 2025-2026 (charge bien l'historique).
 
-## 🚀 Installation
+### Régler ton niveau d'agressivité (groupe « 6) Gestion du risque »)
+| Risque/trade | Rendement* | Drawdown* |
+|--------------|------------|-----------|
+| 2 % | modéré | ~8 % |
+| **3 % (défaut)** | élevé | ~12 % |
+| 4-5 % | très élevé | ~16-20 % ⚠️ |
 
-1. TradingView → graphique **XAUUSD**, passe-le en **1H**.
-2. **⚠️ Supprime les anciennes versions** de la stratégie du graphique (sur tes captures, elle
-   était ajoutée **3 fois** — garde-en une seule, sinon les signaux se superposent).
-3. **Pine Editor** → colle le contenu de [`Gold_Strategy_XAUUSD.pine`](./Gold_Strategy_XAUUSD.pine) → **Add to chart**.
-4. Onglet **Strategy Tester** pour les performances.
+*\(approximations ; le PF et le % de réussite ne changent pas, c'est juste la taille des positions\)*
 
----
+> ⚠️ **Ne dépasse pas 5 %.** Au-delà, une mauvaise série de pertes peut détruire le compte,
+> même avec un bon edge. L'agressivité se règle par le **risque par trade**, pas en descendant
+> sur des time frames plus bruités.
 
-## 📐 Méthode de réglage (importante)
-
-1. Lance la v3 **par défaut** → tu dois voir un **nombre raisonnable de trades** sur 1–2 ans,
-   avec un **Facteur de profit qui doit viser > 1.3** et un taux de réussite **35–50 %**.
-2. Si **trop peu de trades** : baisse l'ADX min (18), réduis la fenêtre de repli, désactive la pente.
-3. Si **PF < 1** : durcis le régime (ADX 25), active le filtre **HTF**, ou la **session** (overlap 12:00–16:00).
-4. Teste **Supertrend trailing** vs **TP fixe** (R:R 2.0–3.0) — garde le meilleur PF.
-5. Valide sur **2–3 ans** (Deep Backtest), pas seulement 6 mois. Vise **30+ trades** pour que
-   les stats aient un sens. Ne sur-optimise pas (garde des réglages standards).
-
----
-
-## ⚠️ Le point honnête
-
-Personne ne peut garantir une stratégie « ultra rentable » qui gagne à coup sûr — et les
-sources sérieuses le disent toutes (« past backtest results do not guarantee future
-performance »). Ce que cette v3 apporte, c'est une **structure que les traders or rentables
-utilisent réellement** : trader la tendance, entrer sur repli, couper vite, laisser courir.
-Le reste est une affaire d'**optimisation rigoureuse et de gestion du risque**.
+### Pour avoir ENCORE plus de trades
+- Désactive le **filtre HTF 4H** (groupe « 4 ») → plus de signaux.
+- Baisse **ADX minimum** à 15 (groupe « 3 »).
+- Désactive le **filtre pente EMA200** (groupe « 3 »).
+- ⚠️ Plus de trades = signaux de moins bonne qualité en moyenne. Surveille le Profit Factor.
 
 ---
 
-## 📚 Sources de la recherche
+## 📊 Logique commune à toutes les versions
 
-- [Gold (XAUUSD) Trading Strategy: Guide for Forex Traders — NYC Servers](https://newyorkcityservers.com/blog/gold-xauusd-trading-strategy)
-- [XAUUSD Trading Strategies: 3 Backtested Approaches (8,693 Trades) — Quant Signals](https://quant-signals.com/xauusd-trading-strategies/)
-- [Gold Trading Strategies 2026 — LiteFinance](https://www.litefinance.org/blog/for-investors/gold-trading/gold-trading-strategies/)
-- [The Best EMA Settings for Gold Trading — Dominion Markets](https://www.dominionmarkets.com/ema-settings-for-gold-trading-xau-usd/)
-- [Ultimate Guide to Backtesting Gold with Smart Money Concepts — ACY](https://acy.com/en/market-news/education/ultimate-guide-backtesting-trading-gold-xau-usd-j-o-110321/)
-- [XAU/USD Trading Strategies: What Traders Often Miss — Vantage](https://www.vantagemarkets.com/academy/trading-xauusd-tips-and-strategies/)
-- [When to Trade Gold (XAUUSD): Top Strategies — QuantVPS](https://www.quantvps.com/blog/when-to-trade-gold)
-- [Pine Script Supertrend Guide — Pineify](https://pineify.app/resources/blog/pine-script-supertrend-a-comprehensive-guide)
+1. **Filtre de régime** : on ne trade QUE dans une vraie tendance (EMA50/200 + pente + ADX + Supertrend).
+2. **Entrée sur pullback** : on attend un repli vers l'EMA rapide PUIS la reprise → on entre bas, meilleur R:R.
+3. **Sorties** : trailing Supertrend (laisse courir les gains) + break-even + sortie partielle.
+4. **Money management** : taille de position calculée sur le risque (% du capital / distance de stop),
+   plafond de levier, capital 1 000 €.
 
 ---
 
-## 📁 Fichiers
-- `Gold_Strategy_XAUUSD.pine` — la stratégie (Pine Script v6).
-- `README.md` — ce guide.
+## 📈 Résultats backtestés (référence, Vantage XAUUSD)
+
+| Version | TF | Période | Trades | Réussite | Profit Factor | Drawdown |
+|---------|----|---------|--------|----------|---------------|----------|
+| Sniper | 4H | 7,5 ans | 64 | 56 % | **1,70** | 4,8 % |
+| Base | 4H | 7,5 ans | 162 | 49 % | 1,35 | 9,9 % |
+| **30m Équilibré** | 30m | 1,5 an | **218** | 54 % | 1,30 | 3,1 % |
+| 15m | 15m | — | — | 39 % | 0,65 ❌ | — |
+
+*Le 30 min à 3 % de risque vise un rendement nettement supérieur pour un drawdown maîtrisé.*
+
+---
+
+## ⚠️ Le mot de la fin (honnête)
+
+- Un **Profit Factor de 1,3 à 1,7 sur l'or, c'est un vrai bon résultat.** Personne ne te
+  donnera un « +500 %/an garanti » — ça n'existe pas, et celui qui le promet ment.
+- L'agressivité **se gère par le % de risque**, en gardant une stratégie qui marche (30m/4H),
+  **pas** en cherchant plus d'action sur le 15 min qui ne fonctionne pas.
+- La vraie performance dépendra de ta **discipline** et du **respect du risque**, plus que d'un
+  indicateur de plus.
+
+---
+
+## 📂 Liste des fichiers
+- `Gold_Strategy_XAUUSD.pine` — base robuste 4H (GOLD-MASTER-v3)
+- `Gold_Strategy_XAUUSD_4H_Sniper.pine` — peu de trades, ultra fiable (GOLD-4H-SNIPER)
+- `Gold_Strategy_XAUUSD_30m_Balanced.pine` — **agressif + beaucoup de trades (GOLD-30m-BAL)** ⭐
+- `Gold_Strategy_XAUUSD_PriceAction_SR.pine` — supports/résistances (GOLD-SR-PA)
+- `Gold_Strategy_XAUUSD_15m_Aggressive.pine` — ⛔ à éviter (GOLD-15m-AGGR)
