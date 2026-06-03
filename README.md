@@ -26,11 +26,42 @@ recherche sur les méthodes qui fonctionnent réellement sur l'or :
 
 | Objectif | Fichier | Time frame | Profil |
 |----------|---------|-----------|--------|
-| 🔥 **Agressif + beaucoup de trades** (ton choix) | `Gold_Strategy_XAUUSD_30m_Balanced.pine` | **30 min** | Risque 3 %, filtre 4H, ~200 trades |
+| 🏆 **DÉFI : 2-5 trades/sem gagnants, perte max 10 %** | `Gold_Strategy_XAUUSD_Challenge10.pine` | **1H** | Repli RSI en tendance + **gouverneur de drawdown 10 %** |
+| 🔥 **Agressif + beaucoup de trades** | `Gold_Strategy_XAUUSD_30m_Balanced.pine` | 30 min | Risque 3 %, ~200 trades |
 | 🎯 **Le plus fiable** (peu de trades) | `Gold_Strategy_XAUUSD_4H_Sniper.pine` | 4H | Confluence max, PF ~1,7 |
+| 🎯 **Fort taux de réussite** | `Gold_Strategy_XAUUSD_HighWinRate.pine` | 1H | Repli RSI, cible serrée |
 | 🧱 **Base robuste polyvalente** | `Gold_Strategy_XAUUSD.pine` | 4H | Risque 1 %, réglable |
 | 👁️ **Avec supports/résistances** | `Gold_Strategy_XAUUSD_PriceAction_SR.pine` | 30m / 1H | Niveaux S/R affichés |
 | ⛔ **À éviter** | `Gold_Strategy_XAUUSD_15m_Aggressive.pine` | 15 min | 15 min = trop bruité (PF < 1) |
+
+---
+
+## 🏆 LE DÉFI 10 % — `Gold_Strategy_XAUUSD_Challenge10.pine`
+
+Conçue à partir de 3 axes de recherche (entrée, money management, fréquence) pour répondre
+**exactement** à tes critères : **2-5 trades gagnants par semaine, petits gains réguliers,
+perte maximale plafonnée à 10 %**.
+
+| Critère | Comment c'est garanti |
+|---------|------------------------|
+| **2-5 trades/semaine** | Signal **1H** + filtre tendance **4H** + session **08:00-16:00** |
+| **Trades gagnants** | Repli RSI **dans le sens de la tendance** (seul edge vérifié sur l'or) + cible serrée 1,3R + break-even |
+| **Perte max 10 %** | **Gouverneur de capital** : réduit la taille dès −5 % de drawdown, et **ARRÊTE les entrées à −10 %** (kill switch) |
+| **Risque assumé** | 1 % par trade (agressif mais borné par le gouverneur) |
+
+### Le gouverneur de drawdown (groupe « 5b »)
+- Suit le **sommet de capital** et calcule le **drawdown courant** (affiché en haut à droite).
+- À **−5 %** de drawdown → taille de position **divisée par 2**.
+- À **−10 %** → **plus aucune nouvelle entrée** (le défi est « perdu », on protège le capital).
+- Fond rouge/orange sur le graphique quand le gouverneur agit.
+
+### Réglages pour ajuster
+- **Plus de trades** : élargis la session, baisse l'ADX à 15, ou désactive le pullback EMA21.
+- **Encore plus de réussite** : baisse la cible à 1,0-1,2R.
+- **Resserrer la fréquence à 2-3/sem** : session sur l'overlap **12:00-16:00**.
+
+> ⚠️ Le gouverneur plafonne le risque, il ne garantit pas le gain. Un fort taux de réussite
+> n'est pas une garantie de profit (les sources le rappellent toutes). Backteste sur 2-3 ans.
 
 ---
 
@@ -107,6 +138,8 @@ C'est le **meilleur compromis « beaucoup de trades + rentable »** d'après les
 ---
 
 ## 📂 Liste des fichiers
+- `Gold_Strategy_XAUUSD_Challenge10.pine` — **DÉFI 10 % : 2-5 trades/sem, perte max 10 % (GOLD-DEFI-10)** 🏆
+- `Gold_Strategy_XAUUSD_HighWinRate.pine` — fort taux de réussite, repli RSI (GOLD-HWR)
 - `Gold_Strategy_XAUUSD.pine` — base robuste 4H (GOLD-MASTER-v3)
 - `Gold_Strategy_XAUUSD_4H_Sniper.pine` — peu de trades, ultra fiable (GOLD-4H-SNIPER)
 - `Gold_Strategy_XAUUSD_30m_Balanced.pine` — **agressif + beaucoup de trades (GOLD-30m-BAL)** ⭐
